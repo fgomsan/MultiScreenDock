@@ -1,0 +1,20 @@
+name: Build macOS Universal App
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build MultiScreenDock.app
+        run: ./build.sh
+
+      - name: Verify Universal Binary architectures
+        run: lipo -info MultiScreenDock.app/Contents/MacOS/MultiScreenDock

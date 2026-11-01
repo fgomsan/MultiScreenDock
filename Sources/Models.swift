@@ -1,0 +1,292 @@
+import Cocoa
+
+enum DockItemKind: Equatable {
+    case finder
+    case application(bundleID: String?, url: URL)
+    case directoryOrFile(url: URL, isDirectory: Bool)
+    case separator
+    case trash(isFull: Bool)
+}
+
+struct DockItem: Equatable {
+    let id: String
+    let label: String
+    let kind: DockItemKind
+    let icon: NSImage
+    let isRunning: Bool
+    let isFrontmost: Bool
+
+    static func == (lhs: DockItem, rhs: DockItem) -> Bool {
+        lhs.id == rhs.id &&
+        lhs.label == rhs.label &&
+        lhs.kind == rhs.kind &&
+        lhs.isRunning == rhs.isRunning &&
+        lhs.isFrontmost == rhs.isFrontmost
+    }
+}
+
+final class DockModelReader {
+    static let shared = DockModelReader()
+
+    private var iconCache: [String: NSImage] = [:]
+    private var lastPlistModDate: Date?
+    private var cachedPersistentApps: [(label: String, bundleID: String?, url: URL)] = []
+    private var cachedPersistentOthers: [(label: String, url: URL, isDirectory: Bool)] = []
+    private var cachedTrashFullFromPlist: Bool = false
+
+    private let dockPlistURL: URL = {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Library/Preferences/com.apple.dock.plist")
+    }()
+
+    private init() {
+        reloadPlistCache()
+    }
+
+    @discardableResult
+    func checkPlistChangedAndReloadIfNeeded() -> Bool {
+        guard let attrs = try? FileManager.default.attributesOfItem(atPath: dockPlistURL.path),
+              let modDate = attrs[.modificationDate] as? Date else {
+            return false
+        }
+        if lastPlistModDate != modDate {
+            reloadPlistCache()
+            return true
+        }
+        return false
+    }
+
+    func reloadPlistCache() {
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: dockPlistURL.path),
+           let modDate = attrs[.modificationDate] as? Date {
+            lastPlistModDate = modDate
+        }
+
+        guard let data = try? Data(contentsOf: dockPlistURL),
+              let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else {
+            return
+        }
+
+        cachedTrashFullFromPlist = (plist["trash-full"] as? Bool) ?? false
+
+        var appsResult: [(label: String, bundleID: String?, url: URL)] = []
+        if let rawApps = plist["persistent-apps"] as? [[String: Any]] {
+            for entry in rawApps {
+                let tileType = entry["tile-type"] as? String ?? "file-tile"
+                if tileType.contains("spacer") { continue }
+                guard let tileData = entry["tile-data"] as? [String: Any] else { continue }
+
+                let bundleID = tileData["bundle-identifier"] as? String
+                let rawLabel = tileData["file-label"] as? String
+                let urlString = (tileData["file-data"] as? [String: Any])?["_CFURLString"] as? String
+
+                var resolvedURL: URL?
+                if let urlString = urlString, let candidate = URL(string: urlString),
+                   FileManager.default.fileExists(atPath: candidate.path) {
+                    resolvedURL = candidate
+                } else if let bundleID = bundleID,
+                          let candidate = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
+                    resolvedURL = candidate
+                }
+
+                guard let finalURL = resolvedURL else { continue }
+                let label = rawLabel ?? finalURL.deletingPathExtension().lastPathComponent
+                appsResult.append((label: label, bundleID: bundleID, url: finalURL))
+            }
+        }
+        cachedPersistentApps = appsResult
+
+        var othersResult: [(label: String, url: URL, isDirectory: Bool)] = []
+        if let rawOthers = plist["persistent-others"] as? [[String: Any]] {
+            for entry in rawOthers {
+                let tileType = entry["tile-type"] as? String ?? "file-tile"
+                if tileType.contains("spacer") { continue }
+                guard let tileData = entry["tile-data"] as? [String: Any],
+                      let urlString = (tileData["file-data"] as? [String: Any])?["_CFURLString"] as? String,
+                      let fileURL = URL(string: urlString),
+                      FileManager.default.fileExists(atPath: fileURL.path) else {
+                    continue
+                }
+                var isDir: ObjCBool = false
+                FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDir)
+                let label = (tileData["file-label"] as? String) ?? fileURL.lastPathComponent
+                othersResult.append((label: label, url: fileURL, isDirectory: isDir.boolValue))
+            }
+        }
+        cachedPersistentOthers = othersResult
+    }
+
+    func buildItems(includeUnpinnedRunning: Bool) -> [DockItem] {
+        let workspace = NSWorkspace.shared
+        let runningApps = workspace.runningApplications
+        let frontmostBundleID = workspace.frontmostApplication?.bundleIdentifier
+        let frontmostURL = workspace.frontmostApplication?.bundleURL?.standardizedFileURL
+
+        var runningBundleIDs = Set<String>()
+        var runningURLs = Set<URL>()
+
+        for app in runningApps where !app.isTerminated {
+            if let bid = app.bundleIdentifier {
+                runningBundleIDs.insert(bid)
+            }
+            if let u = app.bundleURL?.standardizedFileURL {
+                runningURLs.insert(u)
+            }
+        }
+
+        var items: [DockItem] = []
+        var representedBundleIDs = Set<String>()
+        var representedURLs = Set<URL>()
+
+        // 1. Finder (siempre primero en macOS)
+        let finderBundleID = "com.apple.finder"
+        let finderURL = URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app")
+        representedBundleIDs.insert(finderBundleID)
+        representedURLs.insert(finderURL.standardizedFileURL)
+        items.append(DockItem(
+            id: "finder",
+            label: "Finder",
+            kind: .finder,
+            icon: iconForFile(finderURL.path),
+            isRunning: true,
+            isFrontmost: frontmostBundleID == finderBundleID
+        ))
+
+        // 2. Apps ancladas en com.apple.dock (persistent-apps)
+        for (idx, entry) in cachedPersistentApps.enumerated() {
+            if entry.bundleID == finderBundleID { continue }
+            let stdURL = entry.url.standardizedFileURL
+            if let bid = entry.bundleID { representedBundleIDs.insert(bid) }
+            representedURLs.insert(stdURL)
+
+            let running = (entry.bundleID.map { runningBundleIDs.contains($0) } ?? false) || runningURLs.contains(stdURL)
+            let front = (entry.bundleID != nil && entry.bundleID == frontmostBundleID) || (stdURL == frontmostURL)
+
+            items.append(DockItem(
+                id: "pinned-\(entry.bundleID ?? entry.url.path)-\(idx)",
+                label: entry.label,
+                kind: .application(bundleID: entry.bundleID, url: entry.url),
+                icon: iconForFile(entry.url.path),
+                isRunning: running,
+                isFrontmost: front
+            ))
+        }
+
+        // 3. Apps regulares abiertas que no están ancladas
+        if includeUnpinnedRunning {
+            let ownBundleID = Bundle.main.bundleIdentifier ?? DockSettings.bundleIdentifier
+            var extraItems: [DockItem] = []
+            for app in runningApps {
+                guard app.activationPolicy == .regular, !app.isTerminated else { continue }
+                let bid = app.bundleIdentifier
+                if bid == ownBundleID || bid == "com.apple.dock" { continue }
+                let stdURL = app.bundleURL?.standardizedFileURL
+
+                if let bid = bid, representedBundleIDs.contains(bid) { continue }
+                if let stdURL = stdURL, representedURLs.contains(stdURL) { continue }
+                guard let appURL = app.bundleURL else { continue }
+
+                if let bid = bid { representedBundleIDs.insert(bid) }
+                if let stdURL = stdURL { representedURLs.insert(stdURL) }
+
+                let name = app.localizedName ?? appURL.deletingPathExtension().lastPathComponent
+                let front = (bid != nil && bid == frontmostBundleID) || (stdURL == frontmostURL)
+                let icon = app.icon ?? iconForFile(appURL.path)
+
+                extraItems.append(DockItem(
+                    id: "running-\(bid ?? appURL.path)",
+                    label: name,
+                    kind: .application(bundleID: bid, url: appURL),
+                    icon: icon,
+                    isRunning: true,
+                    isFrontmost: front
+                ))
+            }
+
+            if !extraItems.isEmpty {
+                items.append(DockItem(
+                    id: "sep-running",
+                    label: "",
+                    kind: .separator,
+                    icon: NSImage(),
+                    isRunning: false,
+                    isFrontmost: false
+                ))
+                items.append(contentsOf: extraItems)
+            }
+        }
+
+        // 4. Separador final + Carpetas/Archivos (persistent-others) + Papelera
+        items.append(DockItem(
+            id: "sep-others",
+            label: "",
+            kind: .separator,
+            icon: NSImage(),
+            isRunning: false,
+            isFrontmost: false
+        ))
+
+        for (idx, other) in cachedPersistentOthers.enumerated() {
+            items.append(DockItem(
+                id: "other-\(other.url.path)-\(idx)",
+                label: other.label,
+                kind: .directoryOrFile(url: other.url, isDirectory: other.isDirectory),
+                icon: iconForFile(other.url.path),
+                isRunning: false,
+                isFrontmost: false
+            ))
+        }
+
+        let isTrashFull = isUserTrashNonEmpty() ?? cachedTrashFullFromPlist
+        items.append(DockItem(
+            id: "trash",
+            label: L10n.trashLabel,
+            kind: .trash(isFull: isTrashFull),
+            icon: trashIcon(isFull: isTrashFull),
+            isRunning: false,
+            isFrontmost: false
+        ))
+
+        return items
+    }
+
+    private func iconForFile(_ path: String) -> NSImage {
+        if let cached = iconCache[path] {
+            return cached
+        }
+        let img = NSWorkspace.shared.icon(forFile: path)
+        img.size = NSSize(width: 64, height: 64)
+        iconCache[path] = img
+        return img
+    }
+
+    private func isUserTrashNonEmpty() -> Bool? {
+        guard let trashURL = FileManager.default.urls(for: .trashDirectory, in: .userDomainMask).first else {
+            return nil
+        }
+        guard let contents = try? FileManager.default.contentsOfDirectory(atPath: trashURL.path) else {
+            return nil
+        }
+        let meaningful = contents.filter { $0 != ".DS_Store" }
+        return !meaningful.isEmpty
+    }
+
+    private func trashIcon(isFull: Bool) -> NSImage {
+        let key = isFull ? "__trash_full__" : "__trash_empty__"
+        if let cached = iconCache[key] {
+            return cached
+        }
+        let dockRes = "/System/Library/CoreServices/Dock.app/Contents/Resources/"
+        let candidates = isFull
+            ? [dockRes + "trashfull@2x.png", dockRes + "trashfull.png", "/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/FullTrashIcon.icns"]
+            : [dockRes + "trashempty@2x.png", dockRes + "trashempty.png", "/System/Library/CoreServices/CoreTypes.bundle/Contents/Resources/TrashIcon.icns"]
+
+        for p in candidates {
+            if let img = NSImage(contentsOfFile: p) {
+                iconCache[key] = img
+                return img
+            }
+        }
+        return NSWorkspace.shared.icon(forFile: "/System/Library/CoreServices/Finder.app")
+    }
+}

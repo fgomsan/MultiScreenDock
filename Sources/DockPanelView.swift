@@ -4,42 +4,55 @@ import QuartzCore
 // MARK: - Subtle Bottom Edge Hint Pill (for Auto-Hide Mode)
 
 final class EdgeHintPanel: NSPanel {
-    private let pillView = NSView()
+    private static let winWidth: CGFloat = 156
+    private static let winHeight: CGFloat = 16
 
     init(screen: NSScreen) {
-        let width: CGFloat = 92
-        let height: CGFloat = 8
         let rect = NSRect(
-            x: round(screen.frame.midX - width / 2),
+            x: round(screen.frame.midX - Self.winWidth / 2),
             y: round(screen.frame.minY + 3),
-            width: width,
-            height: height
+            width: Self.winWidth,
+            height: Self.winHeight
         )
         super.init(
             contentRect: rect,
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
-            defer: true
+            defer: false
         )
         isOpaque = false
         backgroundColor = .clear
         hasShadow = false
         ignoresMouseEvents = true
         hidesOnDeactivate = false
-        level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.dockWindow)) - 1)
+        level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.dockWindow)))
         applyCollectionBehavior()
 
-        let root = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: Self.winWidth, height: Self.winHeight))
         root.wantsLayer = true
+        root.layer?.masksToBounds = false
         contentView = root
 
-        pillView.frame = NSRect(x: 4, y: 2, width: width - 8, height: 3.5)
-        pillView.wantsLayer = true
-        pillView.layer?.cornerRadius = 1.75
-        pillView.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.28).cgColor
-        pillView.layer?.borderWidth = 0.5
-        pillView.layer?.borderColor = NSColor.black.withAlphaComponent(0.22).cgColor
-        root.addSubview(pillView)
+        // Cápsula exterior oscura con sombra para contraste sobre fondos blancos/claros
+        let outerFrame = NSRect(x: 8, y: 4, width: Self.winWidth - 16, height: 7)
+        let outerTrack = NSView(frame: outerFrame)
+        outerTrack.wantsLayer = true
+        outerTrack.layer?.cornerRadius = 3.5
+        outerTrack.layer?.cornerCurve = .continuous
+        outerTrack.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
+        outerTrack.layer?.shadowColor = NSColor.black.cgColor
+        outerTrack.layer?.shadowOpacity = 0.50
+        outerTrack.layer?.shadowRadius = 3.0
+        outerTrack.layer?.shadowOffset = CGSize(width: 0, height: -1)
+        root.addSubview(outerTrack)
+
+        // Núcleo interior luminoso estilo Home Bar para contraste sobre fondos oscuros
+        let innerPill = NSView(frame: NSRect(x: 1.25, y: 1.25, width: outerFrame.width - 2.5, height: outerFrame.height - 2.5))
+        innerPill.wantsLayer = true
+        innerPill.layer?.cornerRadius = 2.25
+        innerPill.layer?.cornerCurve = .continuous
+        innerPill.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.88).cgColor
+        outerTrack.addSubview(innerPill)
     }
 
     func applyCollectionBehavior() {
@@ -52,13 +65,11 @@ final class EdgeHintPanel: NSPanel {
 
     func updatePosition(on screen: NSScreen) {
         applyCollectionBehavior()
-        let width: CGFloat = 92
-        let height: CGFloat = 8
         let target = NSRect(
-            x: round(screen.frame.midX - width / 2),
+            x: round(screen.frame.midX - Self.winWidth / 2),
             y: round(screen.frame.minY + 3),
-            width: width,
-            height: height
+            width: Self.winWidth,
+            height: Self.winHeight
         )
         if frame != target {
             setFrame(target, display: true)

@@ -97,6 +97,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        let skipPrimaryItem = NSMenuItem(
+            title: L10n.skipPrimaryDisplay,
+            action: #selector(toggleSkipPrimary),
+            keyEquivalent: ""
+        )
+        skipPrimaryItem.target = self
+        skipPrimaryItem.state = settings.skipPrimaryDisplay ? .on : .off
+        menu.addItem(skipPrimaryItem)
+
         let replaceNativeItem = NSMenuItem(
             title: L10n.hideNativeDock,
             action: #selector(toggleNativeDockAutohide),
@@ -169,12 +178,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for (idx, screen) in NSScreen.screens.enumerated() {
             let w = Int(screen.frame.width)
             let h = Int(screen.frame.height)
+            let primaryTag = settings.isPrimaryDisplay(screen) ? ", \(L10n.primaryBadge)" : ""
             let suffix: String
             if hasStackedRows {
                 let rowLabel = screen.frame.minY >= 600 ? L10n.rowUpper : L10n.rowLower
-                suffix = " — \(w)×\(h) (\(rowLabel))"
+                suffix = " — \(w)×\(h) (\(rowLabel)\(primaryTag))"
             } else {
-                suffix = " — \(w)×\(h)"
+                suffix = primaryTag.isEmpty ? " — \(w)×\(h)" : " — \(w)×\(h) (\(L10n.primaryBadge))"
             }
             let title = "\(idx + 1). \(screen.localizedName)\(suffix)"
             let sItem = NSMenuItem(title: title, action: #selector(toggleScreenEnabled(_:)), keyEquivalent: "")
@@ -224,6 +234,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
            let val = AutoHideResponsiveness(rawValue: raw) {
             DockSettings.shared.responsiveness = val
         }
+    }
+
+    @objc private func toggleSkipPrimary() {
+        DockSettings.shared.skipPrimaryDisplay.toggle()
     }
 
     @objc private func toggleNativeDockAutohide() {

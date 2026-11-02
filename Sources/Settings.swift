@@ -48,6 +48,7 @@ final class DockSettings {
         static let visibilityMode = "visibilityMode"
         static let responsiveness = "responsiveness"
         static let showHiddenHintPill = "showHiddenHintPill"
+        static let skipPrimaryDisplay = "skipPrimaryDisplay"
         static let iconSize = "iconSize"
         static let avoidNativeDockOverlap = "avoidNativeDockOverlap"
         static let showOverFullScreen = "showOverFullScreen"
@@ -65,6 +66,7 @@ final class DockSettings {
             Keys.visibilityMode: DockVisibilityMode.autoHide.rawValue,
             Keys.responsiveness: AutoHideResponsiveness.balanced.rawValue,
             Keys.showHiddenHintPill: true,
+            Keys.skipPrimaryDisplay: true,
             Keys.iconSize: initialTileSize,
             Keys.avoidNativeDockOverlap: true,
             Keys.showOverFullScreen: true,
@@ -113,6 +115,14 @@ final class DockSettings {
         get { defaults.bool(forKey: Keys.showHiddenHintPill) }
         set {
             defaults.set(newValue, forKey: Keys.showHiddenHintPill)
+            onChange?()
+        }
+    }
+
+    var skipPrimaryDisplay: Bool {
+        get { defaults.bool(forKey: Keys.skipPrimaryDisplay) }
+        set {
+            defaults.set(newValue, forKey: Keys.skipPrimaryDisplay)
             onChange?()
         }
     }
@@ -180,11 +190,28 @@ final class DockSettings {
         return screen.localizedName
     }
 
+    func isPrimaryDisplay(_ screen: NSScreen) -> Bool {
+        if let num = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {
+            return CGDirectDisplayID(num.uint32Value) == CGMainDisplayID()
+        }
+        return screen === NSScreen.screens.first
+    }
+
     func isScreenEnabled(_ screen: NSScreen) -> Bool {
-        !disabledScreens.contains(screenKey(for: screen))
+        if skipPrimaryDisplay && isPrimaryDisplay(screen) {
+            return false
+        }
+        return !disabledScreens.contains(screenKey(for: screen))
     }
 
     func toggleScreen(_ screen: NSScreen) {
+        if isPrimaryDisplay(screen) && skipPrimaryDisplay {
+            skipPrimaryDisplay = false
+            var current = disabledScreens
+            current.remove(screenKey(for: screen))
+            disabledScreens = current
+            return
+        }
         let key = screenKey(for: screen)
         var current = disabledScreens
         if current.contains(key) {

@@ -65,6 +65,15 @@ enum L10n {
              "Pausada (requiere detener más el cursor)")
     }
 
+    static var skipPrimaryDisplay: String {
+        pick("Skip primary display (use native macOS Dock there)",
+             "Omitir en el monitor principal (usar allí el Dock original)")
+    }
+
+    static var primaryBadge: String {
+        pick("Primary", "Principal")
+    }
+
     static var hideNativeDock: String {
         pick("Auto-hide Apple's native Dock",
              "Ocultar automáticamente el Dock nativo de Apple")

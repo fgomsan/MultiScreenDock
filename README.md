@@ -1,70 +1,84 @@
 # MultiScreenDock
 
-[![Build macOS Universal App](https://github.com/fgomsan/MultiScreenDock/actions/workflows/build.yml/badge.svg)](https://github.com/fgomsan/MultiScreenDock/actions/workflows/build.yml)
-[![Platform](https://img.shields.io/badge/platform-macOS%2013%2B%20(Universal)-blue)](#installation)
-[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/fgomsan/MultiScreenDock)](https://github.com/fgomsan/MultiScreenDock/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![macOS 13+](https://img.shields.io/badge/macOS-13%2B%20Universal-blue)](#requirements)
+[![Build](https://github.com/fgomsan/MultiScreenDock/actions/workflows/build.yml/badge.svg)](https://github.com/fgomsan/MultiScreenDock/actions/workflows/build.yml)
 
-**MultiScreenDock** is a lightweight, zero-dependency, native Swift/AppKit utility that keeps a live, synchronized macOS Dock **simultaneously visible across all connected monitors** — including vertically stacked upper displays where Apple's native Dock can never be summoned.
+**The macOS Dock only shows on one display.** MultiScreenDock is a native Swift/AppKit menu-bar app that keeps a live copy of that Dock on every connected monitor, including stacked upper displays where the pointer never hits a screen edge and the system Dock cannot appear.
 
----
+**El Dock de macOS solo aparece en una pantalla.** MultiScreenDock mantiene una copia en vivo en cada monitor, también en pantallas apiladas arriba, donde el Dock del sistema no puede salir. [Guía breve en español](#español).
 
-## Why does this exist?
+<!--
+TODO (owner): record a real demo and commit it as docs/demo.gif (GIF) or docs/demo.mp4.
+Do not commit a mockup, a generated frame, or someone else's screenshot.
 
-macOS has two hard limitations when working with multiple monitors (2, 3, 5+ displays):
+Suggested capture, about 10–20 seconds, on a Mac with two or more displays
+(a stacked pair makes the point):
+  1. The pointer reaches the bottom edge of a secondary or upper display and the bar slides up.
+  2. A click launches or activates an app without the bar stealing focus first.
+  3. A right-click on the bar opens settings.
 
-1. **Single-instance Dock:** Apple only renders the Dock on **one display at a time**, forcing you to push your cursor against a screen's bottom edge and wait for it to jump.
-2. **Stacked displays dead-zone:** If you stack monitors in two rows (e.g. two ultrawide/4K displays above three lower displays), the bottom edge of the upper monitors borders the lower displays. Because your mouse cursor crosses into the lower monitors instead of hitting a physical boundary, **Apple's native Dock can never appear on the upper displays at all.**
+When the file exists, delete this comment and the blockquote below, and leave:
 
-```
-┌───────────────────────┬───────────────────────┐
-│   Upper Display 1     │   Upper Display 2     │
-│     [════Dock════]    │     [════Dock════]    │  ◄── Native macOS Dock can NEVER reach here
-├───────────────┬───────┴───────┬───────────────┤
-│ Lower Left    │  Main / Mac   │ Lower Right   │
-│  [═══Dock═══] │  [═══Dock═══] │  [═══Dock═══] │  ◄── Native macOS only shows 1 at a time
-└───────────────┴───────────────┴───────────────┘
-```
+![MultiScreenDock on stacked displays](docs/demo.gif)
+-->
 
-**MultiScreenDock** solves both problems cleanly in ~700 lines of pure Swift/AppKit, using **~0.0% idle CPU** and requiring **no Screen Recording or Accessibility permissions**.
-
----
+> **Demo — not recorded yet.** The slot is [`docs/demo.gif`](docs/demo.gif). That file is intentionally absent until a real screen recording is committed. The image tag is commented out above so the README does not show a broken image before then.
 
 ## Features
 
-- **Two Visibility Modes (switchable in 1 click):**
-  - **Smart Auto-Hide & Hover Reveal:** Keeps every display clean and smoothly slides the Dock up when your cursor approaches any monitor's bottom zone — featuring an **anti-crossing dwell filter** on stacked upper monitors so moving the mouse quickly between upper and lower screens never triggers false popups, plus a clipped animation that never bleeds pixels onto lower monitors and an optional subtle bottom edge hint pill.
-  - **Always Fixed & Visible:** Keeps the Dock permanently visible on all monitors at once.
-- **Automatic sync with your real macOS Dock:** Reads `~/Library/Preferences/com.apple.dock.plist` and live `NSWorkspace` notifications to mirror **Finder**, all your **pinned apps**, **currently running unpinned apps** (with active/frontmost indicator dots), **pinned folders/files** (e.g. *Downloads*), and the **Trash**.
-- **Smart anti-overlap with Apple's native Dock:** Automatically hides its bar on whichever single monitor currently displays Apple's native Dock (`visibleFrame` detection), or lets you toggle Apple's Dock auto-hide in one click from the menu bar so all monitors share the exact same static bar.
-- **Primary Display Awareness:** Skips your primary display by default so Apple's native macOS Dock remains untouched there while MultiScreenDock powers all secondary monitors (easily toggleable if you prefer MultiScreenDock on all screens).
-- **Direct Right-Click Settings (Bartender/Notch friendly):** Access the full MultiScreenDock settings menu either by right-clicking any Dock's background/separator, from the *MultiScreenDock Settings ▸* submenu on any icon, or via the menu bar icon (`dock.rectangle`).
-- **Per-monitor adaptive scaling:** Keeps your preferred icon size on wide monitors while proportionally scaling down on narrower displays so icons never clip or overflow.
-- **Non-activating floating glass bar:** Clicking or hovering never steals focus from your active text editor or window until you launch/activate an app.
-- **Full mouse & drag-and-drop workflow:**
-  - **Left click:** Launch / activate app (`⌘+Click` reveals in Finder, `⌥+Click` hides active app).
-  - **Right click:** Context menu (*Open/Show*, *Show in Finder*, *Hide*, *Quit*, *Empty Trash…*).
-  - **Drag & Drop:** Drag files directly onto any app icon, folder, or Trash on any monitor.
-- **Visible over full-screen apps** (optional toggle in menu bar).
-- **Per-display toggles & Launch at Login** built right into the menu bar icon (`dock.rectangle`).
-- **Automatic Localization:** English and Spanish (`en` / `es`) out of the box.
+- **Two visibility modes.** Auto-hide, revealed by dwelling at the bottom edge, or always visible. On a display with another monitor directly underneath, the dwell is longer (90 / 150 / 250 ms instead of 40 / 80 / 160 ms) so a fast vertical crossing does not pop the bar. An optional pill marks the bottom center while the bar is hidden.
+- **The same items as your Dock.** Finder, pinned apps, running apps that are not pinned (with a dot, brighter for the frontmost app), pinned files and folders, and the Trash. Spacers in `com.apple.dock.plist` are skipped. Icons refresh from that plist, from `NSWorkspace` launch/quit/activate notifications, and from **Sync Dock Icons Now**.
+- **Stays out of the system Dock's way.** The primary display is skipped by default. On any display where the system Dock is currently taking bottom space, the extra bar hides while **Avoid overlapping where native Dock is visible** is on.
+- **Settings where your hand already is.** Right-click the bar, Control-click it, or open **MultiScreenDock Settings** at the bottom of an icon's menu. The same menu is on the menu-bar icon (`dock.rectangle`, or the title "Dock+" if that symbol is missing). Per-display toggles, icon size (28 / 36 / 44 / 52 pt, scaled down to fit a narrow screen, floor 20 pt), hover magnification, and launch at login live there.
+- **Clicks that match the Dock closely enough to use.** Click launches or activates. Command-click reveals an app, file, or folder in Finder. Option-click hides an app when that app is already frontmost. Right-click can open, show in Finder, hide, quit, open a Finder window, or empty the Trash. Drop files on an app to open them with it, on a folder to move them into it, or on the Trash to trash them.
+- **A panel that does not take focus.** The bar is a non-activating `NSPanel`. Hovering it leaves the current app active. The label under the pointer is the item name. Hover magnification scales that one icon to 1.18×.
+- **English and Spanish**, chosen from the first preferred language (`en` / `es`).
 
----
+## Requirements
 
-## Installation
+- macOS 13.0 or later (`LSMinimumSystemVersion` is 13.0; the binary is built `-target arm64-apple-macos13.0` and `x86_64-apple-macos13.0`).
+- Apple silicon or Intel. Release and `./build.sh` both produce one universal binary.
+- More than one display is the case this is for. With a single display the bar stays off, because **Skip primary display** defaults to on.
 
-### Option A: Download Prebuilt Universal App (Apple Silicon + Intel)
+Build from source also needs the Xcode Command Line Tools (`xcode-select --install`), which provide `swiftc`, `lipo`, `iconutil`, and `codesign`.
 
-1. Download **`MultiScreenDock-v1.2.0-macOS.zip`** from the [**Latest Release**](https://github.com/fgomsan/MultiScreenDock/releases/latest).
-2. Unzip and move **`MultiScreenDock.app`** to `/Applications` (or anywhere you like).
-3. Because the app is ad-hoc signed without a paid Apple Developer ID certificate, clear the Gatekeeper quarantine flag once before first launch:
+## Install
+
+### Download a release
+
+1. Download [`MultiScreenDock-v1.2.0-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.2.0/MultiScreenDock-v1.2.0-macOS.zip) from the [latest release](https://github.com/fgomsan/MultiScreenDock/releases/latest).
+2. Unzip it and move `MultiScreenDock.app` to `/Applications`.
+3. The v1.2.0 app is ad-hoc signed (`codesign --sign -`) and has no Developer ID certificate and no notarization ticket. Gatekeeper blocks the quarantined download until you allow it once:
+
    ```bash
-   xattr -cr /Applications/MultiScreenDock.app
+   xattr -dr com.apple.quarantine /Applications/MultiScreenDock.app
    open /Applications/MultiScreenDock.app
    ```
 
-### Option B: Build from Source (takes ~5 seconds)
+   Right-click the app and choose **Open**, or allow it from **System Settings → Privacy & Security**, if you prefer not to use the terminal.
 
-Requires macOS 13+ with Xcode Command Line Tools (`xcode-select --install`):
+### Homebrew
+
+There is no `brew install --cask multiscreendock` from `homebrew/homebrew-cask` yet. A cask for the v1.2.0 zip is in [`packaging/homebrew/multiscreendock.rb`](packaging/homebrew/multiscreendock.rb). It can be installed from a checkout, or from a personal tap once `fgomsan/homebrew-tap` exists:
+
+From a checkout of this repo:
+
+```bash
+brew install --cask --no-quarantine ./packaging/homebrew/multiscreendock.rb
+```
+
+After a personal tap repository `fgomsan/homebrew-tap` exists and contains this cask:
+
+```bash
+brew tap fgomsan/tap
+brew install --cask multiscreendock
+```
+
+`--no-quarantine` matters for this build: Homebrew quarantines cask downloads, and Gatekeeper rejects this ad-hoc signature. After a normal tap install, clear quarantine on the copy in `/Applications` or `~/Applications` with the `xattr` command above. A Developer ID signature and an Apple notarization ticket are what remove that step. See the release workflow notes in [`.github/workflows/notarize-release.yml`](.github/workflows/notarize-release.yml).
+
+### Build from source
 
 ```bash
 git clone https://github.com/fgomsan/MultiScreenDock.git
@@ -73,31 +87,139 @@ cd MultiScreenDock
 open ./MultiScreenDock.app
 ```
 
----
+`./build.sh` writes `./MultiScreenDock.app`, ad-hoc signs it, and does not notarize it. A local build is not quarantined, so Gatekeeper's download check does not apply.
 
-## Español — Guía rápida
+## Usage
 
-**MultiScreenDock** mantiene tu Dock de macOS **siempre visible de forma simultánea en todas tus pantallas** (2, 3, 5 o más monitores), incluyendo **pantallas colocadas en una fila superior**, donde el Dock nativo de Apple jamás puede subir porque el ratón cruza hacia los monitores inferiores.
+MultiScreenDock runs as a menu-bar app (`LSUIElement`). It has no Dock icon and no main window.
 
-### Características principales
-- **Dos modos de visibilidad:**
-  - **Auto-ocultación inteligente al acercar el ratón abajo:** el Dock desaparece para dejar todo el escritorio libre y emerge con una animación suave al acercar el cursor a la parte baja de cualquiera de tus pantallas (con filtro anti-cruce para que al bajar rápido de un monitor superior a uno inferior no salte por error, recorte limpio sin invadir el monitor inferior y línea guía sutil opcional).
-  - **Siempre fijo visible:** mantiene el Dock permanentemente a la vista en todas las pantallas simultáneamente.
-- **Sincronización automática:** Muestra **Finder**, tus **apps ancladas**, las **apps abiertas en ejecución** (con punto indicador), tus **carpetas/archivos del Dock** (*Descargas*, etc.) y la **Papelera**, leyendo directamente tu configuración real de `com.apple.dock.plist`.
-- **Cero permisos invasivos y ~0 % de CPU:** Escrito al 100 % en Swift/AppKit nativo, sin pedir permisos de Accesibilidad ni Grabación de Pantalla.
-- **Control directo con clic derecho en el propio Dock (y en la barra de menús):** Abre todos los ajustes haciendo clic derecho directamente sobre el cristal/separador de cualquier Dock (ideal si usas *Bartender*, *Ice* o un MacBook con *Notch*), cambia el tamaño de iconos, omite automáticamente el monitor principal (donde ya vive el Dock original de macOS) o activa **Abrir al iniciar sesión**.
+The menu-bar icon, a right-click on the bar, or **MultiScreenDock Settings** on an item opens the same menu:
 
-### Compilar o instalar
+| Setting | What it does | Default |
+| --- | --- | --- |
+| Auto-hide / always visible | Slide up after a short dwell at the bottom edge, or stay on screen | Auto-hide |
+| Bottom-edge indicator | A small pill at the bottom center while the bar is hidden | On |
+| Hover reveal sensitivity | Fast, balanced, or relaxed dwell and hide delay | Balanced |
+| Skip primary display | Leave the display that hosts the system Dock alone | On |
+| Auto-hide Apple's native Dock | Asks System Events to toggle the system Dock's auto-hide | Off |
+| Avoid overlapping the native Dock | Hide the extra bar on a display whose bottom `visibleFrame` is inset | On |
+| Allow on full-screen apps | Join full-screen spaces (`fullScreenAuxiliary`) | On |
+| Smooth hover magnification | Scale the icon under the pointer | On |
+| Show running unpinned apps | Append regular running apps that are not pinned | On |
+| Icon size | 28, 36, 44, or 52 pt | The system Dock's tile size, when that value is between 20 and 80 |
+| Active displays | Turn individual screens on or off | All non-primary screens |
+| Launch at Login | Writes a per-user LaunchAgent | Off |
+
+**Sync Dock Icons Now** (⌘R in the menu) re-reads the Dock plist immediately. Quit is ⌘Q in that menu.
+
+Click behavior:
+
+- **Click** a pinned or running app to launch or activate it. Click Finder to activate Finder, opening a window at your home folder only when Finder has no windows. Click a file or folder to open it. Click the Trash to open it.
+- **Command-click** an app, file, or folder to reveal it in Finder. Finder and the Trash ignore the modifier and perform their normal click.
+- **Option-click** an app that is already frontmost to hide it. Otherwise the click activates the app.
+- **Right-click** an item for Open/Show, Show in Finder, Hide, Quit, New Finder Window, or Empty Trash. The Trash's Empty item is enabled only when the Trash is not empty.
+- **Drag files** onto an app, a folder, or the Trash. A drop on a folder moves the files into that folder. A drop on the Trash uses `FileManager.trashItem`.
+
+The reveal strip sits on the bottom center of each enabled display. Its width is the wider of 55% of the display and the bar plus 80 pt, and it is never wider than the display minus 24 pt. It is 20 pt tall, or 26 pt when another display sits directly below. Corners outside that strip do not summon the bar. Once visible, the bar stays up while the pointer is over it, including a little padding around the bar, then waits out a hide delay (0.22 / 0.32 / 0.45 s).
+
+## Permissions
+
+The Dock bar itself does not request Accessibility or Screen Recording. The code never calls `AXIsProcessTrusted`, never monitors keystrokes, and never captures the screen. Auto-hide uses `NSEvent.addGlobalMonitorForEvents` for mouse movement and drags. Apple's documentation requires Accessibility for key monitors; this app does not install one.
+
+macOS asks for **Automation** permission only when a feature sends Apple events:
+
+| Action | Target | If you deny it |
+| --- | --- | --- |
+| Finder-icon click, and New Finder Window | Finder | A Finder click falls back to launching Finder.app. **New Finder Window** does not open a window. |
+| Empty Trash | Finder | The Trash stays as it is. Opening the Trash still works. |
+| Auto-hide Apple's native Dock | System Events | The app falls back to `defaults write com.apple.dock autohide` and `killall Dock`, which restarts the Dock. |
+
+`Info.plist` includes `NSAppleEventsUsageDescription` for that prompt. Reading `~/Library/Preferences/com.apple.dock.plist` uses your own preferences file and does not raise a permission dialog.
+
+**Launch at Login** writes `~/Library/LaunchAgents/io.github.fgomsan.multiscreendock.plist` with `RunAtLoad` and the absolute path of the binary. Moving or renaming the app later leaves that path stale until you toggle the setting off and on.
+
+## Uninstall
+
+Quit from the menu (**Quit MultiScreenDock**), then delete the app.
+
 ```bash
-git clone https://github.com/fgomsan/MultiScreenDock.git
-cd MultiScreenDock
-./build.sh
-open ./MultiScreenDock.app
+osascript -e 'tell application id "io.github.fgomsan.MultiScreenDock" to quit' || true
+rm -rf /Applications/MultiScreenDock.app
+launchctl bootout "gui/$(id -u)/io.github.fgomsan.multiscreendock" 2>/dev/null || true
+rm -f ~/Library/LaunchAgents/io.github.fgomsan.multiscreendock.plist
+rm -f ~/Library/Preferences/io.github.fgomsan.MultiScreenDock.plist
 ```
-*(Si descargas el `.zip` desde [Releases](https://github.com/fgomsan/MultiScreenDock/releases/latest), ejecuta `xattr -cr MultiScreenDock.app` antes de abrirlo por primera vez).*
 
----
+The LaunchAgent file exists only if **Launch at Login** was turned on. The preferences file holds the menu settings (mode, sizes, disabled displays).
+
+From Homebrew, once the cask is installed:
+
+```bash
+brew uninstall --cask multiscreendock
+brew uninstall --cask --zap multiscreendock
+```
+
+`uninstall` quits the app, boots out the LaunchAgent label, and deletes that plist. `--zap` also deletes the preferences plist.
+
+## Limitations
+
+- The bar is always centered on the **bottom** edge. A system Dock pinned to the left or right edge is not mirrored, and overlap detection only looks at the bottom `visibleFrame` inset.
+- This is a separate panel, not Apple's Dock process. There is no bounce, no notification badge, no download progress, no folder stack or fan (a folder opens in Finder), and no Dock spacers. Hover magnification scales the single icon under the pointer; it is not the system Dock's magnification curve.
+- Dropping files on a folder **moves** them (`FileManager.moveItem`). A name collision or a permissions error is ignored (`try?`).
+- **Upper** / **Lower** in the displays menu is a label for screens whose `minY` is at least 600 points. The stacked-display dwell uses actual frame geometry, not that label.
+- The full-screen setting adds `fullScreenAuxiliary` at Dock window level. Some exclusive full-screen windows still cover the bar.
+- "Sync" follows the Dock plist and `NSWorkspace` notifications. It is not a private Dock API. A plist change is picked up on the next 0.8 second timer tick, or immediately from **Sync Dock Icons Now**.
+- While the pointer is moving, auto-hide evaluates at most about 60 times a second. A timer also fires every 0.8 seconds: it reloads icons when the Dock plist or the native Dock's bottom inset changed, and otherwise re-checks the pointer in auto-hide mode.
+- The app does not register a Service Management login item. Login launch is a LaunchAgent plist, and it stores an absolute path.
+- v1.2.0 is ad-hoc signed. Gatekeeper does not treat the downloaded zip as notarized software.
+- Interface strings exist for English and Spanish only.
+
+## FAQ
+
+**Does it replace the Dock?**
+It draws its own bar from the Dock's plist and from running apps. The system Dock keeps running. The primary display is left to the system Dock unless you turn **Skip primary display** off.
+
+**I only have one monitor. Why is there no bar?**
+That display is the primary display, and it is skipped by default. Turn **Skip primary display** off.
+
+**Why did macOS say the app is from an unidentified developer?**
+The release zip is signed ad hoc, with an empty certificate chain and no notarization ticket. Clear the quarantine flag or use **Open** once, as in [Install](#download-a-release). A future Developer ID build is what removes the warning.
+
+**Does it need Accessibility?**
+Not for this code. No Accessibility trust prompt is part of launch. Automation prompts appear only for the Finder and System Events actions in [Permissions](#permissions).
+
+**What happens if I change icon size or pinned apps in System Settings?**
+Pinned apps and folders are re-read when `com.apple.dock.plist` changes. The in-app icon size is independent after you pick a size; the first launch copies the system tile size when it falls between 20 and 80 pt.
+
+**Can I put the bar on the left or the right?**
+No. Geometry, hit testing, and the reveal strip are bottom-edge only.
+
+**Is the Homebrew cask live?**
+The cask file is in this repo. It is not in `homebrew/homebrew-cask`. That tap accepts a macOS app only when Gatekeeper accepts the download on a default install, which this ad-hoc signature does not pass. Install from the file in the repo, or from a personal tap named `fgomsan/homebrew-tap`, until a notarized build is published.
+
+## Español
+
+MultiScreenDock es una app de barra de menús, en Swift/AppKit, sin dependencias. Muestra en cada monitor una barra sincronizada con tu Dock: Finder, apps fijadas, apps abiertas no fijadas (con un punto; más brillante si están delante), archivos y carpetas fijados, y la Papelera. El monitor principal se omite por defecto para no tapar el Dock del sistema.
+
+En pantallas apiladas, el borde inferior del monitor de arriba no es un tope físico. La barra espera un poco más en ese borde (90, 150 o 250 ms según la sensibilidad) para no abrirse cuando el cursor solo está de paso hacia el monitor de abajo.
+
+**Instalación.** Descarga [`MultiScreenDock-v1.2.0-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.2.0/MultiScreenDock-v1.2.0-macOS.zip), muévela a `/Applications` y, la primera vez:
+
+```bash
+xattr -dr com.apple.quarantine /Applications/MultiScreenDock.app
+open /Applications/MultiScreenDock.app
+```
+
+La versión 1.2.0 está firmada ad hoc, sin notarizar. Homebrew oficial todavía no sirve el cask; el archivo está en `packaging/homebrew/multiscreendock.rb`. Para compilar: `./build.sh` en macOS 13 o posterior, con las Command Line Tools.
+
+**Permisos.** No pide Accesibilidad ni Grabación de Pantalla. macOS pedirá permiso de Automatización al controlar el Finder (clic en el icono de Finder, ventana nueva, vaciar la Papelera) o System Events (ocultar automáticamente el Dock del sistema). Si rechazas System Events, esa opción reinicia el Dock con `killall Dock`.
+
+**Uso.** Clic derecho sobre la barra, o el icono `dock.rectangle` en la barra de menús. Clic abre o activa. ⌘-clic muestra el ítem en el Finder (salvo Finder y la Papelera). ⌥-clic oculta la app si ya está delante. Arrastrar archivos a una carpeta los mueve dentro.
+
+**Desinstalar.** Sal de la app y borra `MultiScreenDock.app`. Si activaste **Abrir al iniciar sesión**, borra también `~/Library/LaunchAgents/io.github.fgomsan.multiscreendock.plist`. Los ajustes están en `~/Library/Preferences/io.github.fgomsan.MultiScreenDock.plist`.
+
+La barra solo existe en el borde inferior. No reproduce rebote, globos de notificación, pilas de carpetas ni el aumento en curva del Dock del sistema.
 
 ## License
 
-Released under the [MIT License](LICENSE).
+[MIT](LICENSE). Copyright (c) 2026 Fernando Gómez Sancha.

@@ -1,0 +1,239 @@
+# Notarized release build. Inert until every secret below is set.
+#
+# The v1.2.0 zip is ad-hoc signed (`codesign --sign -` in build.sh):
+# both arm64 and x86_64 slices have CS_ADHOC set, an empty CMS signature,
+# no Team ID, and no stapled notarization ticket. Gatekeeper rejects that
+# download. This workflow re-signs a Release build with a Developer ID
+# Application certificate, submits it to notarytool, staples the ticket,
+# and uploads the zip to the GitHub release for that tag.
+#
+# It does not run on pull requests. On a tag push or a manual run it starts
+# a short Ubuntu job. The macOS build starts only when all six secrets are
+# non-empty. Until then the workflow succeeds and the macOS job is skipped.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#
+#   APPLE_CERTIFICATE_P12
+#       base64 of a "Developer ID Application" .p12 (not Apple Development,
+#       not "Mac App Distribution").
+#       macOS: base64 -i developerID_application.p12 | pbcopy
+#   APPLE_CERTIFICATE_PASSWORD
+#       Password for that .p12.
+#   APPLE_TEAM_ID
+#       10-character Team ID from the Apple Developer account.
+#   APPLE_NOTARY_KEY
+#       Full PEM contents of an App Store Connect API key (.p8), including
+#       the BEGIN/END lines. The key's role must be allowed to use notarytool
+#       (Developer or App Manager).
+#   APPLE_NOTARY_KEY_ID
+#       The key id, for example AB12CD34EF.
+#   APPLE_NOTARY_ISSUER_ID
+#       The issuer UUID shown next to the API key.
+#
+# After the first notarized asset is uploaded, recomputed sha256 of the new
+# zip has to replace the checksum in packaging/homebrew/multiscreendock.rb.
+# build.sh still hardcodes CFBundleShortVersionString 1.2.0 for local builds.
+# This workflow rewrites that string on the runner so the signed app matches
+# the tag. CFBundleVersion inside build.sh is left as committed ("3").
+
+name: Notarized release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to build and notarize, for example v1.2.0"
+        required: true
+        type: string
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    outputs:
+      ready: ${{ steps.check.outputs.ready }}
+    steps:
+      - name: Skip until Apple signing secrets exist
+        id: check
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in \
+            APPLE_CERTIFICATE_P12 \
+            APPLE_CERTIFICATE_PASSWORD \
+            APPLE_TEAM_ID \
+            APPLE_NOTARY_KEY \
+            APPLE_NOTARY_KEY_ID \
+            APPLE_NOTARY_ISSUER_ID
+          do
+            if [ -z "${!name}" ]; then
+              echo "Missing secret: ${name}"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Apple signing secrets are not configured. The notarized macOS build was skipped."
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  notarize:
+    needs: gate
+    if: needs.gate.outputs.ready == 'true'
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout the requested tag
+        if: github.event_name == 'workflow_dispatch'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+
+      - name: Resolve version from the tag
+        id: ver
+        env:
+          INPUT_TAG: ${{ inputs.tag }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="$INPUT_TAG"
+          else
+            TAG="$GITHUB_REF_NAME"
+          fi
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Tag must look like v1.2.0 (got: ${TAG})"
+            exit 1
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Stamp CFBundleShortVersionString from the tag
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
+        run: |
+          set -euo pipefail
+          python3 - "$VERSION" << 'PY'
+          import pathlib, re, sys
+          version = sys.argv[1]
+          path = pathlib.Path("build.sh")
+          text = path.read_text()
+          new, count = re.subn(
+              r"(<key>CFBundleShortVersionString</key>\n    <string>)[^<]+(</string>)",
+              lambda match: match.group(1) + version + match.group(2),
+              text,
+              count=1,
+          )
+          if count != 1:
+              raise SystemExit(f"expected to patch one short version, patched {count}")
+          path.write_text(new)
+          PY
+
+      - name: Build universal app
+        run: ./build.sh
+
+      - name: Import Developer ID certificate
+        env:
+          APPLE_CERTIFICATE_P12: ${{ secrets.APPLE_CERTIFICATE_P12 }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          CERT_PATH="$RUNNER_TEMP/certificate.p12"
+          KEYCHAIN_PATH="$RUNNER_TEMP/app-signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+          echo "$APPLE_CERTIFICATE_P12" | base64 --decode > "$CERT_PATH"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security import "$CERT_PATH" -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$KEYCHAIN_PATH"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security list-keychains -d user -s "$KEYCHAIN_PATH" $(security list-keychains -d user | sed 's/"//g')
+          rm -f "$CERT_PATH"
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> "$GITHUB_ENV"
+
+      - name: Sign with Developer ID and hardened runtime
+        env:
+          KEYCHAIN_PATH: ${{ env.KEYCHAIN_PATH }}
+        run: |
+          set -euo pipefail
+          IDENTITY="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH" | sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p' | head -n 1)"
+          if [ -z "$IDENTITY" ]; then
+            echo "No Developer ID Application identity in the imported .p12"
+            security find-identity -v -p codesigning "$KEYCHAIN_PATH" || true
+            exit 1
+          fi
+          echo "Signing with: $IDENTITY"
+          codesign --force --options runtime --timestamp \
+            --entitlements packaging/macos/entitlements.plist \
+            --sign "$IDENTITY" \
+            MultiScreenDock.app/Contents/MacOS/MultiScreenDock
+          codesign --force --options runtime --timestamp \
+            --entitlements packaging/macos/entitlements.plist \
+            --sign "$IDENTITY" \
+            MultiScreenDock.app
+          codesign --verify --strict --verbose=2 MultiScreenDock.app
+          codesign -dv --verbose=4 MultiScreenDock.app 2>&1 | sed -n '1,40p'
+
+      - name: Notarize and staple
+        env:
+          APPLE_NOTARY_KEY: ${{ secrets.APPLE_NOTARY_KEY }}
+          APPLE_NOTARY_KEY_ID: ${{ secrets.APPLE_NOTARY_KEY_ID }}
+          APPLE_NOTARY_ISSUER_ID: ${{ secrets.APPLE_NOTARY_ISSUER_ID }}
+        run: |
+          set -euo pipefail
+          KEY_PATH="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s\n' "$APPLE_NOTARY_KEY" > "$KEY_PATH"
+          chmod 600 "$KEY_PATH"
+          ditto -c -k --keepParent MultiScreenDock.app "$RUNNER_TEMP/MultiScreenDock-notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/MultiScreenDock-notarize.zip" \
+            --key "$KEY_PATH" \
+            --key-id "$APPLE_NOTARY_KEY_ID" \
+            --issuer "$APPLE_NOTARY_ISSUER_ID" \
+            --wait
+          rm -f "$KEY_PATH"
+          xcrun stapler staple MultiScreenDock.app
+          xcrun stapler validate MultiScreenDock.app
+          spctl --assess --type execute --verbose=4 MultiScreenDock.app
+
+      - name: Zip and upload to the GitHub release
+        env:
+          TAG: ${{ steps.ver.outputs.tag }}
+          VERSION: ${{ steps.ver.outputs.version }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ZIP="MultiScreenDock-v${VERSION}-macOS.zip"
+          ditto -c -k --norsrc --keepParent MultiScreenDock.app "$ZIP"
+          shasum -a 256 "$ZIP"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$ZIP" --clobber
+          else
+            gh release create "$TAG" "$ZIP" \
+              --title "MultiScreenDock ${TAG}" \
+              --notes "Developer ID-signed and notarized build from ${GITHUB_SHA}."
+          fi
+
+      - name: Remove signing keychain
+        if: always()
+        run: |
+          if [ -n "${KEYCHAIN_PATH:-}" ]; then
+            security delete-keychain "$KEYCHAIN_PATH" || true
+          fi

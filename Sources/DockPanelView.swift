@@ -431,6 +431,13 @@ final class DockTileView: NSView {
             break
         }
 
+        if let settingsMenu = AppDelegate.shared?.buildFreshSettingsMenu() {
+            menu.addItem(.separator())
+            let subItem = NSMenuItem(title: L10n.dockSettingsSubmenu, action: nil, keyEquivalent: "")
+            subItem.submenu = settingsMenu
+            menu.addItem(subItem)
+        }
+
         return menu
     }
 
@@ -623,6 +630,27 @@ final class DockBarPanel: NSPanel {
         itemsContainer.wantsLayer = true
         itemsContainer.layer?.masksToBounds = false
         slidingContainer.addSubview(itemsContainer)
+    }
+
+    override func rightMouseDown(with event: NSEvent) {
+        presentDockSettingsMenu(with: event)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        if event.modifierFlags.contains(.control) {
+            presentDockSettingsMenu(with: event)
+            return
+        }
+        super.mouseDown(with: event)
+    }
+
+    private func presentDockSettingsMenu(with event: NSEvent) {
+        guard let settingsMenu = AppDelegate.shared?.buildFreshSettingsMenu(),
+              let targetView = contentView else { return }
+        HoverBubbleController.shared.hide()
+        isContextMenuOpen = true
+        defer { isContextMenuOpen = false }
+        NSMenu.popUpContextMenu(settingsMenu, with: event, for: targetView)
     }
 
     func applyCollectionBehavior() {

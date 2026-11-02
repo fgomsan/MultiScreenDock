@@ -123,6 +123,10 @@ enum L10n {
         pick("Launch at Login", "Abrir automáticamente al iniciar sesión")
     }
 
+    static var dockSettingsSubmenu: String {
+        pick("MultiScreenDock Settings", "Ajustes de MultiScreenDock")
+    }
+
     static var quitApp: String {
         pick("Quit MultiScreenDock", "Salir de MultiScreenDock")
     }

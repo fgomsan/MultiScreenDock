@@ -1,14 +1,23 @@
 import Cocoa
 
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
+    static weak var shared: AppDelegate?
+
     private var statusItem: NSStatusItem!
     private let statusMenu = NSMenu()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Self.shared = self
         NSApp.setActivationPolicy(.accessory)
 
         setupStatusItem()
         MultiScreenController.shared.start()
+    }
+
+    func buildFreshSettingsMenu() -> NSMenu {
+        let m = NSMenu(title: "MultiScreenDock")
+        populateSettingsMenu(m)
+        return m
     }
 
     private func setupStatusItem() {
@@ -29,6 +38,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Dynamic Menu Construction
 
     func menuNeedsUpdate(_ menu: NSMenu) {
+        populateSettingsMenu(menu)
+    }
+
+    func populateSettingsMenu(_ menu: NSMenu) {
         menu.removeAllItems()
         let settings = DockSettings.shared
         let counts = MultiScreenController.shared.statusCounts()

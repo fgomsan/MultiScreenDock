@@ -4,13 +4,13 @@ import QuartzCore
 // MARK: - Subtle Bottom Edge Hint Pill (for Auto-Hide Mode)
 
 final class EdgeHintPanel: NSPanel {
-    private static let winWidth: CGFloat = 156
-    private static let winHeight: CGFloat = 16
+    private static let winWidth: CGFloat = 120
+    private static let winHeight: CGFloat = 12
 
     init(screen: NSScreen) {
         let rect = NSRect(
             x: round(screen.frame.midX - Self.winWidth / 2),
-            y: round(screen.frame.minY + 3),
+            y: round(screen.frame.minY + 2),
             width: Self.winWidth,
             height: Self.winHeight
         )
@@ -33,25 +33,25 @@ final class EdgeHintPanel: NSPanel {
         root.layer?.masksToBounds = false
         contentView = root
 
-        // Cápsula exterior oscura con sombra para contraste sobre fondos blancos/claros
-        let outerFrame = NSRect(x: 8, y: 4, width: Self.winWidth - 16, height: 7)
+        // Cápsula exterior suave para mantener legibilidad discreta sobre fondos claros
+        let outerFrame = NSRect(x: 6, y: 3, width: Self.winWidth - 12, height: 4.5)
         let outerTrack = NSView(frame: outerFrame)
         outerTrack.wantsLayer = true
-        outerTrack.layer?.cornerRadius = 3.5
+        outerTrack.layer?.cornerRadius = 2.25
         outerTrack.layer?.cornerCurve = .continuous
-        outerTrack.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
+        outerTrack.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.30).cgColor
         outerTrack.layer?.shadowColor = NSColor.black.cgColor
-        outerTrack.layer?.shadowOpacity = 0.50
-        outerTrack.layer?.shadowRadius = 3.0
-        outerTrack.layer?.shadowOffset = CGSize(width: 0, height: -1)
+        outerTrack.layer?.shadowOpacity = 0.24
+        outerTrack.layer?.shadowRadius = 2.0
+        outerTrack.layer?.shadowOffset = CGSize(width: 0, height: -0.5)
         root.addSubview(outerTrack)
 
-        // Núcleo interior luminoso estilo Home Bar para contraste sobre fondos oscuros
-        let innerPill = NSView(frame: NSRect(x: 1.25, y: 1.25, width: outerFrame.width - 2.5, height: outerFrame.height - 2.5))
+        // Núcleo interior translúcido equilibrado (visible pero discreto)
+        let innerPill = NSView(frame: NSRect(x: 0.75, y: 0.75, width: outerFrame.width - 1.5, height: outerFrame.height - 1.5))
         innerPill.wantsLayer = true
-        innerPill.layer?.cornerRadius = 2.25
+        innerPill.layer?.cornerRadius = 1.5
         innerPill.layer?.cornerCurve = .continuous
-        innerPill.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.88).cgColor
+        innerPill.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.54).cgColor
         outerTrack.addSubview(innerPill)
     }
 
@@ -67,7 +67,7 @@ final class EdgeHintPanel: NSPanel {
         applyCollectionBehavior()
         let target = NSRect(
             x: round(screen.frame.midX - Self.winWidth / 2),
-            y: round(screen.frame.minY + 3),
+            y: round(screen.frame.minY + 2),
             width: Self.winWidth,
             height: Self.winHeight
         )

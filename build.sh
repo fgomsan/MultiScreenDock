@@ -3,14 +3,16 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="MultiScreenDock"
-APP_BUNDLE="${PROJECT_DIR}/${APP_NAME}.app"
+FINAL_APP_BUNDLE="${PROJECT_DIR}/${APP_NAME}.app"
+BUILD_TMP="$(mktemp -d "${TMPDIR:-/tmp}/multiscreendock_build.XXXXXX")"
+trap 'rm -rf "${BUILD_TMP}"' EXIT
+
+APP_BUNDLE="${BUILD_TMP}/${APP_NAME}.app"
 CONTENTS_DIR="${APP_BUNDLE}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
-BUILD_TMP="${PROJECT_DIR}/.build_tmp"
 
-rm -rf "${APP_BUNDLE}" "${BUILD_TMP}"
-mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}" "${BUILD_TMP}"
+mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 
 echo "1/3 Generating app icon..."
 ICONSET_DIR="${BUILD_TMP}/AppIcon.iconset"
@@ -126,9 +128,9 @@ cat > "${CONTENTS_DIR}/Info.plist" << 'EOF'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>1.1.0</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>2</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>
@@ -156,8 +158,10 @@ swiftc -O -target arm64-apple-macos13.0 -framework Cocoa -framework QuartzCore "
 swiftc -O -target x86_64-apple-macos13.0 -framework Cocoa -framework QuartzCore "${SOURCES[@]}" -o "${BUILD_TMP}/${APP_NAME}-x86_64"
 lipo -create -output "${MACOS_DIR}/${APP_NAME}" "${BUILD_TMP}/${APP_NAME}-arm64" "${BUILD_TMP}/${APP_NAME}-x86_64"
 
-rm -rf "${BUILD_TMP}"
 xattr -cr "${APP_BUNDLE}"
 codesign --force --deep --sign - "${APP_BUNDLE}"
 
-echo "Build complete: ${APP_BUNDLE}"
+rm -rf "${FINAL_APP_BUNDLE}"
+ditto "${APP_BUNDLE}" "${FINAL_APP_BUNDLE}"
+
+echo "Build complete: ${FINAL_APP_BUNDLE}"

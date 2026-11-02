@@ -1,6 +1,71 @@
 import Cocoa
 import QuartzCore
 
+// MARK: - Subtle Bottom Edge Hint Pill (for Auto-Hide Mode)
+
+final class EdgeHintPanel: NSPanel {
+    private let pillView = NSView()
+
+    init(screen: NSScreen) {
+        let width: CGFloat = 92
+        let height: CGFloat = 8
+        let rect = NSRect(
+            x: round(screen.frame.midX - width / 2),
+            y: round(screen.frame.minY + 3),
+            width: width,
+            height: height
+        )
+        super.init(
+            contentRect: rect,
+            styleMask: [.borderless, .nonactivatingPanel],
+            backing: .buffered,
+            defer: true
+        )
+        isOpaque = false
+        backgroundColor = .clear
+        hasShadow = false
+        ignoresMouseEvents = true
+        hidesOnDeactivate = false
+        level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.dockWindow)) - 1)
+        applyCollectionBehavior()
+
+        let root = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        root.wantsLayer = true
+        contentView = root
+
+        pillView.frame = NSRect(x: 4, y: 2, width: width - 8, height: 3.5)
+        pillView.wantsLayer = true
+        pillView.layer?.cornerRadius = 1.75
+        pillView.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.28).cgColor
+        pillView.layer?.borderWidth = 0.5
+        pillView.layer?.borderColor = NSColor.black.withAlphaComponent(0.22).cgColor
+        root.addSubview(pillView)
+    }
+
+    func applyCollectionBehavior() {
+        var behavior: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        if DockSettings.shared.showOverFullScreen {
+            behavior.insert(.fullScreenAuxiliary)
+        }
+        collectionBehavior = behavior
+    }
+
+    func updatePosition(on screen: NSScreen) {
+        applyCollectionBehavior()
+        let width: CGFloat = 92
+        let height: CGFloat = 8
+        let target = NSRect(
+            x: round(screen.frame.midX - width / 2),
+            y: round(screen.frame.minY + 3),
+            width: width,
+            height: height
+        )
+        if frame != target {
+            setFrame(target, display: true)
+        }
+    }
+}
+
 // MARK: - Floating Label Bubble (macOS Dock Style)
 
 final class HoverBubbleController {
@@ -92,7 +157,7 @@ final class DockTileView: NSView {
     private var trackingArea: NSTrackingArea?
     private var isHovered = false
 
-    init(item: DockItem, iconSize: CGFloat, tilePadX: CGFloat = 3) {
+    init(item: DockItem, iconSize: CGFloat, tilePadX: CGFloat = 2.5) {
         self.item = item
         self.iconSize = iconSize
         self.tilePadX = tilePadX
@@ -149,25 +214,27 @@ final class DockTileView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
+        guard let barPanel = window as? DockBarPanel, barPanel.isRevealed else { return }
         isHovered = true
         if DockSettings.shared.hoverMagnification {
             animateHover(hovered: true)
         }
-        if let win = window {
-            let rectInWin = convert(imageView.frame, to: nil)
-            let screenRect = win.convertToScreen(rectInWin)
-            HoverBubbleController.shared.show(text: item.label, above: screenRect, on: win.screen)
-        }
+        let rectInWin = convert(imageView.frame, to: nil)
+        let screenRect = barPanel.convertToScreen(rectInWin)
+        HoverBubbleController.shared.show(text: item.label, above: screenRect, on: barPanel.screen)
     }
 
     override func mouseExited(with event: NSEvent) {
+        resetHoverVisuals()
+    }
+
+    func resetHoverVisuals() {
         isHovered = false
         animateHover(hovered: false)
         HoverBubbleController.shared.hide()
     }
 
     private func animateHover(hovered: Bool) {
-        guard let imgLayer = imageView.layer else { return }
         let scale: CGFloat = hovered ? 1.18 : 1.0
         let lift: CGFloat = hovered ? 4.0 : 0.0
 
@@ -185,7 +252,6 @@ final class DockTileView: NSView {
                 height: newSize
             )
         }
-        _ = imgLayer
     }
 
     private func animateClickBounce() {
@@ -223,6 +289,9 @@ final class DockTileView: NSView {
 
     override func rightMouseDown(with event: NSEvent) {
         HoverBubbleController.shared.hide()
+        let barPanel = window as? DockBarPanel
+        barPanel?.isContextMenuOpen = true
+        defer { barPanel?.isContextMenuOpen = false }
         let menu = buildContextMenu()
         NSMenu.popUpContextMenu(menu, with: event, for: self)
     }
@@ -447,22 +516,26 @@ final class DockTileView: NSView {
     }
 }
 
-// MARK: - Per-Screen Dock Bar Panel
+// MARK: - Clipped Root View & Per-Screen Dock Bar Panel
 
-final class PassthroughBarRootView: NSView {
+final class ClippedPassthroughRootView: NSView {
+    weak var slidingContainer: NSView?
     weak var barBackgroundView: NSView?
     weak var tilesContainerView: NSView?
 
     override func hitTest(_ point: NSPoint) -> NSView? {
+        guard let sliding = slidingContainer else { return nil }
+        let ptInSliding = convert(point, to: sliding)
+
         if let container = tilesContainerView {
-            let ptInContainer = convert(point, to: container)
+            let ptInTiles = sliding.convert(ptInSliding, to: container)
             for sub in container.subviews {
-                if sub is DockTileView, sub.frame.contains(ptInContainer) {
-                    return sub.hitTest(container.convert(ptInContainer, to: sub)) ?? sub
+                if sub is DockTileView, sub.frame.contains(ptInTiles) {
+                    return sub.hitTest(container.convert(ptInTiles, to: sub)) ?? sub
                 }
             }
         }
-        if let bg = barBackgroundView, bg.frame.contains(point) {
+        if let bg = barBackgroundView, bg.frame.contains(ptInSliding) {
             return bg
         }
         return nil
@@ -470,14 +543,25 @@ final class PassthroughBarRootView: NSView {
 }
 
 final class DockBarPanel: NSPanel {
+    var isContextMenuOpen = false
+    private(set) var isRevealed = false
+    private var animationToken: Int = 0
+
+    private let sideShadowPad: CGFloat = 14
+    private let topHeadroom: CGFloat = 20
+
+    private let slidingContainer = NSView()
+    private let shadowCarrier = NSView()
     private let backgroundView = NSVisualEffectView()
     private let itemsContainer = NSView()
+
     private var currentItems: [DockItem] = []
     private var lastEffectiveIconSize: CGFloat = 0
+    private(set) var currentBarSize: NSSize = NSSize(width: 400, height: 52)
 
     init(screen: NSScreen) {
         super.init(
-            contentRect: NSRect(x: screen.frame.midX - 200, y: screen.frame.minY + 6, width: 400, height: 58),
+            contentRect: NSRect(x: screen.frame.midX - 200, y: screen.frame.minY, width: 400, height: 80),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
@@ -485,19 +569,34 @@ final class DockBarPanel: NSPanel {
 
         isOpaque = false
         backgroundColor = .clear
-        hasShadow = true
+        hasShadow = false // Sombra gestionada por CALayer dentro de slidingContainer para recortar limpio en monitores apilados
         hidesOnDeactivate = false
         isMovable = false
         acceptsMouseMovedEvents = true
         level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.dockWindow)))
         applyCollectionBehavior()
 
-        let root = PassthroughBarRootView(frame: NSRect(x: 0, y: 0, width: 400, height: 70))
+        let root = ClippedPassthroughRootView(frame: NSRect(x: 0, y: 0, width: 400, height: 80))
         root.wantsLayer = true
-        root.layer?.masksToBounds = false
+        root.layer?.masksToBounds = true // Evita que la animación invada jamás el monitor inferior
+        root.slidingContainer = slidingContainer
         root.barBackgroundView = backgroundView
         root.tilesContainerView = itemsContainer
         contentView = root
+
+        slidingContainer.wantsLayer = true
+        slidingContainer.layer?.masksToBounds = false
+        root.addSubview(slidingContainer)
+
+        shadowCarrier.wantsLayer = true
+        shadowCarrier.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.01).cgColor
+        shadowCarrier.layer?.cornerRadius = 17
+        shadowCarrier.layer?.cornerCurve = .continuous
+        shadowCarrier.layer?.shadowColor = NSColor.black.cgColor
+        shadowCarrier.layer?.shadowOpacity = 0.36
+        shadowCarrier.layer?.shadowRadius = 10
+        shadowCarrier.layer?.shadowOffset = CGSize(width: 0, height: -3)
+        slidingContainer.addSubview(shadowCarrier)
 
         backgroundView.material = .hudWindow
         backgroundView.blendingMode = .behindWindow
@@ -507,25 +606,23 @@ final class DockBarPanel: NSPanel {
         backgroundView.layer?.cornerCurve = .continuous
         backgroundView.layer?.masksToBounds = true
         backgroundView.layer?.borderWidth = 0.8
-        backgroundView.layer?.borderColor = NSColor.white.withAlphaComponent(0.22).cgColor
-        root.addSubview(backgroundView)
+        backgroundView.layer?.borderColor = NSColor.white.withAlphaComponent(0.24).cgColor
+        slidingContainer.addSubview(backgroundView)
 
         itemsContainer.wantsLayer = true
         itemsContainer.layer?.masksToBounds = false
-        root.addSubview(itemsContainer)
+        slidingContainer.addSubview(itemsContainer)
     }
 
     func applyCollectionBehavior() {
         var behavior: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
         if DockSettings.shared.showOverFullScreen {
             behavior.insert(.fullScreenAuxiliary)
-        } else {
-            behavior.insert(.FullScreenNoneFallback)
         }
         collectionBehavior = behavior
     }
 
-    func update(items: [DockItem], on screen: NSScreen, forceLayout: Bool = false) {
+    func updateContentAndGeometry(items: [DockItem], on screen: NSScreen, forceLayout: Bool = false) {
         applyCollectionBehavior()
 
         let preferredSize = DockSettings.shared.iconSize
@@ -537,10 +634,112 @@ final class DockBarPanel: NSPanel {
             currentItems = items
             lastEffectiveIconSize = effectiveSize
             rebuildSubviews(items: items, iconSize: effectiveSize)
+        } else {
+            currentBarSize = barSize(for: items, iconSize: effectiveSize)
         }
 
-        positionOnScreen(screen, iconSize: effectiveSize, items: items)
+        positionWindowFrame(on: screen)
+
+        if isRevealed {
+            slidingContainer.frame.origin = NSPoint(x: sideShadowPad, y: DockSettings.shared.bottomMargin)
+            slidingContainer.alphaValue = 1.0
+        }
     }
+
+    // MARK: - Animated Reveal & Conceal
+
+    func reveal(animated: Bool, on screen: NSScreen) {
+        animationToken &+= 1
+        let wasRevealed = isRevealed
+        isRevealed = true
+        ignoresMouseEvents = false
+
+        positionWindowFrame(on: screen)
+
+        let targetY = DockSettings.shared.bottomMargin
+        let hiddenY = -(currentBarSize.height + 10)
+
+        if !isVisible {
+            slidingContainer.frame.origin = NSPoint(x: sideShadowPad, y: animated ? hiddenY : targetY)
+            slidingContainer.alphaValue = animated ? 0.0 : 1.0
+            orderFrontRegardless()
+        } else if !wasRevealed && animated {
+            // Estaba a mitad de ocultarse: continuamos suavemente desde su posición actual
+        }
+
+        if animated {
+            NSAnimationContext.runAnimationGroup { ctx in
+                ctx.duration = 0.19
+                ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.20, 0.92, 0.25, 1.0)
+                slidingContainer.animator().frame.origin = NSPoint(x: sideShadowPad, y: targetY)
+                slidingContainer.animator().alphaValue = 1.0
+            }
+        } else {
+            slidingContainer.frame.origin = NSPoint(x: sideShadowPad, y: targetY)
+            slidingContainer.alphaValue = 1.0
+        }
+    }
+
+    func conceal(animated: Bool) {
+        guard isRevealed || isVisible else { return }
+        animationToken &+= 1
+        let token = animationToken
+        isRevealed = false
+        ignoresMouseEvents = true
+
+        for case let tile as DockTileView in itemsContainer.subviews {
+            tile.resetHoverVisuals()
+        }
+        HoverBubbleController.shared.hide()
+
+        let hiddenY = -(currentBarSize.height + 10)
+
+        if !animated || !isVisible {
+            slidingContainer.frame.origin = NSPoint(x: sideShadowPad, y: hiddenY)
+            slidingContainer.alphaValue = 0.0
+            orderOut(nil)
+            return
+        }
+
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.17
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            slidingContainer.animator().frame.origin = NSPoint(x: sideShadowPad, y: hiddenY)
+            slidingContainer.animator().alphaValue = 0.0
+        }, completionHandler: { [weak self] in
+            guard let self = self else { return }
+            if self.animationToken == token && !self.isRevealed {
+                self.orderOut(nil)
+            }
+        })
+    }
+
+    // MARK: - Trigger & Keep-Alive Zones on Screen
+
+    func triggerZone(on screen: NSScreen, hasScreenBelow: Bool) -> NSRect {
+        let minTriggerWidth = screen.frame.width * 0.55
+        let width = min(screen.frame.width - 24, max(minTriggerWidth, currentBarSize.width + 80))
+        let height: CGFloat = hasScreenBelow ? 26.0 : 20.0
+        return NSRect(
+            x: round(screen.frame.midX - width / 2),
+            y: screen.frame.minY,
+            width: width,
+            height: height
+        )
+    }
+
+    func keepAliveZone(on screen: NSScreen) -> NSRect {
+        let width = min(screen.frame.width, currentBarSize.width + 56)
+        let height = DockSettings.shared.bottomMargin + currentBarSize.height + 24
+        return NSRect(
+            x: round(screen.frame.midX - width / 2),
+            y: screen.frame.minY,
+            width: width,
+            height: height
+        )
+    }
+
+    // MARK: - Layout Calculations
 
     private func tilePadAndGap(for iconSize: CGFloat) -> (pad: CGFloat, gap: CGFloat) {
         if iconSize >= 34 {
@@ -591,11 +790,13 @@ final class DockBarPanel: NSPanel {
         itemsContainer.subviews.forEach { $0.removeFromSuperview() }
 
         let barSz = barSize(for: items, iconSize: iconSize)
-        let extraTopHeadroom: CGFloat = 16 // espacio superior para la ampliación hover sin recortar
+        currentBarSize = barSz
         let pg = tilePadAndGap(for: iconSize)
 
+        slidingContainer.frame.size = NSSize(width: barSz.width, height: barSz.height + topHeadroom)
+        shadowCarrier.frame = NSRect(x: 0, y: 0, width: barSz.width, height: barSz.height)
         backgroundView.frame = NSRect(x: 0, y: 0, width: barSz.width, height: barSz.height)
-        itemsContainer.frame = NSRect(x: 0, y: 0, width: barSz.width, height: barSz.height + extraTopHeadroom)
+        itemsContainer.frame = NSRect(x: 0, y: 0, width: barSz.width, height: barSz.height + topHeadroom)
 
         var cursorX: CGFloat = 9
         for item in items {
@@ -619,24 +820,16 @@ final class DockBarPanel: NSPanel {
         }
     }
 
-    private func positionOnScreen(_ screen: NSScreen, iconSize: CGFloat, items: [DockItem]) {
-        let barSz = barSize(for: items, iconSize: iconSize)
-        let extraTopHeadroom: CGFloat = 16
-        let winWidth = barSz.width
-        let winHeight = barSz.height + extraTopHeadroom
+    private func positionWindowFrame(on screen: NSScreen) {
+        let winWidth = currentBarSize.width + sideShadowPad * 2
+        let winHeight = DockSettings.shared.bottomMargin + currentBarSize.height + topHeadroom
 
         let originX = round(screen.frame.midX - winWidth / 2.0)
-        let originY = round(screen.frame.minY + DockSettings.shared.bottomMargin)
+        let originY = round(screen.frame.minY)
 
         let targetFrame = NSRect(x: originX, y: originY, width: winWidth, height: winHeight)
         if frame != targetFrame {
             setFrame(targetFrame, display: true)
         }
-    }
-}
-
-private extension NSWindow.CollectionBehavior {
-    static var FullScreenNoneFallback: NSWindow.CollectionBehavior {
-        return []
     }
 }

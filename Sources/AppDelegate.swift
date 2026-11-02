@@ -31,15 +31,70 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func menuNeedsUpdate(_ menu: NSMenu) {
         menu.removeAllItems()
         let settings = DockSettings.shared
-        let counts = MultiScreenController.shared.activePanelCount()
+        let counts = MultiScreenController.shared.statusCounts()
         let nativeAutohide = settings.isNativeDockAutohideEnabled
 
-        let headerTitle = nativeAutohide
-            ? L10n.headerAllPanels(visible: counts.visible, total: counts.total)
-            : L10n.headerHybrid(visible: counts.visible, total: counts.total)
+        let headerTitle: String
+        switch settings.visibilityMode {
+        case .autoHide:
+            headerTitle = L10n.headerAutoHide(enabledCount: counts.enabled, total: counts.total)
+        case .alwaysVisible:
+            headerTitle = nativeAutohide
+                ? L10n.headerAllPanels(visible: counts.visibleNow, total: counts.total)
+                : L10n.headerHybrid(visible: counts.visibleNow, total: counts.total)
+        }
         let header = NSMenuItem(title: headerTitle, action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
+        menu.addItem(.separator())
+
+        // Visibility Mode Radio Group
+        let autoHideModeItem = NSMenuItem(
+            title: L10n.modeAutoHide,
+            action: #selector(selectModeAutoHide),
+            keyEquivalent: ""
+        )
+        autoHideModeItem.target = self
+        autoHideModeItem.state = (settings.visibilityMode == .autoHide) ? .on : .off
+        menu.addItem(autoHideModeItem)
+
+        let fixedModeItem = NSMenuItem(
+            title: L10n.modeAlwaysVisible,
+            action: #selector(selectModeAlwaysVisible),
+            keyEquivalent: ""
+        )
+        fixedModeItem.target = self
+        fixedModeItem.state = (settings.visibilityMode == .alwaysVisible) ? .on : .off
+        menu.addItem(fixedModeItem)
+
+        if settings.visibilityMode == .autoHide {
+            let hintItem = NSMenuItem(
+                title: L10n.showHintPill,
+                action: #selector(toggleHintPill),
+                keyEquivalent: ""
+            )
+            hintItem.target = self
+            hintItem.state = settings.showHiddenHintPill ? .on : .off
+            menu.addItem(hintItem)
+
+            let respSubmenu = NSMenu()
+            let respOptions: [(String, AutoHideResponsiveness)] = [
+                (L10n.respFast, .fast),
+                (L10n.respBalanced, .balanced),
+                (L10n.respRelaxed, .relaxed)
+            ]
+            for (title, val) in respOptions {
+                let rItem = NSMenuItem(title: title, action: #selector(selectResponsiveness(_:)), keyEquivalent: "")
+                rItem.target = self
+                rItem.representedObject = val.rawValue
+                rItem.state = (settings.responsiveness == val) ? .on : .off
+                respSubmenu.addItem(rItem)
+            }
+            let respParent = NSMenuItem(title: L10n.responsivenessMenu, action: nil, keyEquivalent: "")
+            respParent.submenu = respSubmenu
+            menu.addItem(respParent)
+        }
+
         menu.addItem(.separator())
 
         let replaceNativeItem = NSMenuItem(
@@ -151,6 +206,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     // MARK: - Menu Actions
+
+    @objc private func selectModeAutoHide() {
+        DockSettings.shared.visibilityMode = .autoHide
+    }
+
+    @objc private func selectModeAlwaysVisible() {
+        DockSettings.shared.visibilityMode = .alwaysVisible
+    }
+
+    @objc private func toggleHintPill() {
+        DockSettings.shared.showHiddenHintPill.toggle()
+    }
+
+    @objc private func selectResponsiveness(_ sender: NSMenuItem) {
+        if let raw = sender.representedObject as? String,
+           let val = AutoHideResponsiveness(rawValue: raw) {
+            DockSettings.shared.responsiveness = val
+        }
+    }
 
     @objc private func toggleNativeDockAutohide() {
         let next = !DockSettings.shared.isNativeDockAutohideEnabled

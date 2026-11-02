@@ -31,6 +31,9 @@ macOS has two hard limitations when working with multiple monitors (2, 3, 5+ dis
 
 ## Features
 
+- **Two Visibility Modes (switchable in 1 click):**
+  - **Smart Auto-Hide & Hover Reveal:** Keeps every display clean and smoothly slides the Dock up when your cursor approaches any monitor's bottom zone — featuring an **anti-crossing dwell filter** on stacked upper monitors so moving the mouse quickly between upper and lower screens never triggers false popups, plus a clipped animation that never bleeds pixels onto lower monitors and an optional subtle bottom edge hint pill.
+  - **Always Fixed & Visible:** Keeps the Dock permanently visible on all monitors at once.
 - **Automatic sync with your real macOS Dock:** Reads `~/Library/Preferences/com.apple.dock.plist` and live `NSWorkspace` notifications to mirror **Finder**, all your **pinned apps**, **currently running unpinned apps** (with active/frontmost indicator dots), **pinned folders/files** (e.g. *Downloads*), and the **Trash**.
 - **Smart anti-overlap with Apple's native Dock:** Automatically hides its bar on whichever single monitor currently displays Apple's native Dock (`visibleFrame` detection), or lets you toggle Apple's Dock auto-hide in one click from the menu bar so all monitors share the exact same static bar.
 - **Per-monitor adaptive scaling:** Keeps your preferred icon size on wide monitors while proportionally scaling down on narrower displays so icons never clip or overflow.
@@ -49,7 +52,7 @@ macOS has two hard limitations when working with multiple monitors (2, 3, 5+ dis
 
 ### Option A: Download Prebuilt Universal App (Apple Silicon + Intel)
 
-1. Download **`MultiScreenDock-v1.0.0-macOS.zip`** from the [**Latest Release**](https://github.com/fgomsan/MultiScreenDock/releases/latest).
+1. Download **`MultiScreenDock-v1.1.0-macOS.zip`** from the [**Latest Release**](https://github.com/fgomsan/MultiScreenDock/releases/latest).
 2. Unzip and move **`MultiScreenDock.app`** to `/Applications` (or anywhere you like).
 3. Because the app is ad-hoc signed without a paid Apple Developer ID certificate, clear the Gatekeeper quarantine flag once before first launch:
    ```bash
@@ -75,6 +78,9 @@ open ./MultiScreenDock.app
 **MultiScreenDock** mantiene tu Dock de macOS **siempre visible de forma simultánea en todas tus pantallas** (2, 3, 5 o más monitores), incluyendo **pantallas colocadas en una fila superior**, donde el Dock nativo de Apple jamás puede subir porque el ratón cruza hacia los monitores inferiores.
 
 ### Características principales
+- **Dos modos de visibilidad:**
+  - **Auto-ocultación inteligente al acercar el ratón abajo:** el Dock desaparece para dejar todo el escritorio libre y emerge con una animación suave al acercar el cursor a la parte baja de cualquiera de tus pantallas (con filtro anti-cruce para que al bajar rápido de un monitor superior a uno inferior no salte por error, recorte limpio sin invadir el monitor inferior y línea guía sutil opcional).
+  - **Siempre fijo visible:** mantiene el Dock permanentemente a la vista en todas las pantallas simultáneamente.
 - **Sincronización automática:** Muestra **Finder**, tus **apps ancladas**, las **apps abiertas en ejecución** (con punto indicador), tus **carpetas/archivos del Dock** (*Descargas*, etc.) y la **Papelera**, leyendo directamente tu configuración real de `com.apple.dock.plist`.
 - **Cero permisos invasivos y ~0 % de CPU:** Escrito al 100 % en Swift/AppKit nativo, sin pedir permisos de Accesibilidad ni Grabación de Pantalla.
 - **Control desde la barra de menús:** Cambia el tamaño de iconos, activa o desactiva pantallas concretas, mantén el Dock visible sobre apps a pantalla completa, activa **Abrir al iniciar sesión** o activa **Ocultar Dock nativo de Apple** con un clic.

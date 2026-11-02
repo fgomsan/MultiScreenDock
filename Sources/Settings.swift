@@ -1,5 +1,41 @@
 import Cocoa
 
+enum DockVisibilityMode: String {
+    case alwaysVisible = "alwaysVisible"
+    case autoHide = "autoHide"
+}
+
+enum AutoHideResponsiveness: String {
+    case fast = "fast"
+    case balanced = "balanced"
+    case relaxed = "relaxed"
+
+    var bottomEdgeDwell: TimeInterval {
+        switch self {
+        case .fast: return 0.04
+        case .balanced: return 0.08
+        case .relaxed: return 0.16
+        }
+    }
+
+    /// Dwell slightly longer when the bottom edge is shared with a lower monitor so fast vertical crossings never trigger the upper Dock.
+    var stackedEdgeDwell: TimeInterval {
+        switch self {
+        case .fast: return 0.09
+        case .balanced: return 0.15
+        case .relaxed: return 0.25
+        }
+    }
+
+    var hideDelay: TimeInterval {
+        switch self {
+        case .fast: return 0.22
+        case .balanced: return 0.32
+        case .relaxed: return 0.45
+        }
+    }
+}
+
 final class DockSettings {
     static let shared = DockSettings()
 
@@ -9,6 +45,9 @@ final class DockSettings {
     private let defaults = UserDefaults.standard
 
     private enum Keys {
+        static let visibilityMode = "visibilityMode"
+        static let responsiveness = "responsiveness"
+        static let showHiddenHintPill = "showHiddenHintPill"
         static let iconSize = "iconSize"
         static let avoidNativeDockOverlap = "avoidNativeDockOverlap"
         static let showOverFullScreen = "showOverFullScreen"
@@ -23,6 +62,9 @@ final class DockSettings {
     private init() {
         let initialTileSize = Self.readNativeTileSize() ?? 36.0
         defaults.register(defaults: [
+            Keys.visibilityMode: DockVisibilityMode.autoHide.rawValue,
+            Keys.responsiveness: AutoHideResponsiveness.balanced.rawValue,
+            Keys.showHiddenHintPill: true,
             Keys.iconSize: initialTileSize,
             Keys.avoidNativeDockOverlap: true,
             Keys.showOverFullScreen: true,
@@ -37,6 +79,42 @@ final class DockSettings {
         guard let appleDock = UserDefaults(suiteName: "com.apple.dock") else { return nil }
         let val = appleDock.double(forKey: "tilesize")
         return (val >= 20 && val <= 80) ? val : nil
+    }
+
+    var visibilityMode: DockVisibilityMode {
+        get {
+            guard let raw = defaults.string(forKey: Keys.visibilityMode),
+                  let mode = DockVisibilityMode(rawValue: raw) else {
+                return .autoHide
+            }
+            return mode
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Keys.visibilityMode)
+            onChange?()
+        }
+    }
+
+    var responsiveness: AutoHideResponsiveness {
+        get {
+            guard let raw = defaults.string(forKey: Keys.responsiveness),
+                  let val = AutoHideResponsiveness(rawValue: raw) else {
+                return .balanced
+            }
+            return val
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Keys.responsiveness)
+            onChange?()
+        }
+    }
+
+    var showHiddenHintPill: Bool {
+        get { defaults.bool(forKey: Keys.showHiddenHintPill) }
+        set {
+            defaults.set(newValue, forKey: Keys.showHiddenHintPill)
+            onChange?()
+        }
     }
 
     var iconSize: CGFloat {

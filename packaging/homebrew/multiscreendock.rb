@@ -1,7 +1,7 @@
 # Official Homebrew Cask for MultiScreenDock (Apple Developer ID signed & notarized).
 cask "multiscreendock" do
-  version "1.3.2"
-  sha256 "eefc6551dc2d02b9b133d14fb1333b9e3748165f4d07a7ce46140eab56184ae2"
+  version "1.3.3"
+  sha256 "d70e6ac395cb60718df1977e85a70d28693f95d88f3a6cf0183fee02e1772e86"
 
   url "https://github.com/fgomsan/MultiScreenDock/releases/download/v#{version}/MultiScreenDock-v#{version}-macOS.zip"
   name "MultiScreenDock"

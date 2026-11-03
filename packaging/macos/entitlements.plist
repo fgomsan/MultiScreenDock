@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Used only by .github/workflows/notarize-release.yml.
+	     build.sh does not pass this file, so local ad-hoc builds are unchanged.
+	     The app is not sandboxed. Hardened runtime (required for notarization)
+	     still needs this entitlement so NSAppleScript can prompt for Finder
+	     (new window, empty Trash) and System Events (native Dock auto-hide). -->
+	<key>com.apple.security.automation.apple-events</key>
+	<true/>
+</dict>
+</plist>

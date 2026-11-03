@@ -1,4 +1,4 @@
-name: Build macOS Universal App
+name: Build & Test macOS Universal App
 
 on:
   push:
@@ -12,6 +12,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Run unit & geometry regression tests
+        run: chmod +x ./Tests/run_tests.sh && ./Tests/run_tests.sh
 
       - name: Build MultiScreenDock.app
         run: ./build.sh

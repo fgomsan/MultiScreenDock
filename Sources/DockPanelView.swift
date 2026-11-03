@@ -319,10 +319,17 @@ final class DockTileView: NSView {
                 NSWorkspace.shared.activateFileViewerSelecting([url])
                 return
             }
-            if let bid = bundleID,
-               let running = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bid && !$0.isTerminated }) {
+            if let running = DockModelReader.findRunningApplication(bundleID: bundleID, url: url) {
                 if running.isActive && flags.contains(.option) {
                     running.hide()
+                    return
+                }
+                if flags.isEmpty || flags == .option {
+                    if #available(macOS 14.0, *) {
+                        running.activate()
+                    } else {
+                        running.activate(options: [.activateIgnoringOtherApps])
+                    }
                     return
                 }
             }
@@ -392,8 +399,7 @@ final class DockTileView: NSView {
             reveal.target = self
             menu.addItem(reveal)
 
-            if let bid = bundleID,
-               let running = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bid && !$0.isTerminated }) {
+            if let running = DockModelReader.findRunningApplication(bundleID: bundleID, url: url) {
                 menu.addItem(.separator())
                 let hideItem = NSMenuItem(title: running.isHidden ? L10n.showSingle : L10n.hideSingle, action: #selector(ctxToggleHideApp(_:)), keyEquivalent: "")
                 hideItem.representedObject = running
@@ -512,29 +518,166 @@ final class DockTileView: NSView {
         case .application(_, let appURL):
             let config = NSWorkspace.OpenConfiguration()
             config.activates = true
-            NSWorkspace.shared.open(urls, withApplicationAt: appURL, configuration: config, completionHandler: nil)
+            NSWorkspace.shared.open(urls, withApplicationAt: appURL, configuration: config) { _, err in
+                if let err = err {
+                    DispatchQueue.main.async {
+                        Self.presentDragErrorAlert(title: L10n.dragOpenErrorTitle, details: [err.localizedDescription])
+                    }
+                }
+            }
             return true
 
         case .directoryOrFile(let folderURL, let isDir) where isDir:
+            let folderStd = folderURL.standardizedFileURL
+            var succeeded = 0
+            var failures: [String] = []
             for fileURL in urls {
+                let srcStd = fileURL.standardizedFileURL
+                if srcStd == folderStd || srcStd.deletingLastPathComponent() == folderStd {
+                    continue
+                }
                 let dest = folderURL.appendingPathComponent(fileURL.lastPathComponent)
-                try? FileManager.default.moveItem(at: fileURL, to: dest)
+                do {
+                    try FileManager.default.moveItem(at: fileURL, to: dest)
+                    succeeded += 1
+                } catch {
+                    failures.append("• \(fileURL.lastPathComponent): \(error.localizedDescription)")
+                }
             }
-            return true
+            if !failures.isEmpty {
+                DispatchQueue.main.async {
+                    Self.presentDragErrorAlert(title: L10n.dragMoveErrorTitle, details: failures)
+                }
+            }
+            return succeeded > 0
 
         case .trash:
+            var succeeded = 0
+            var failures: [String] = []
             for fileURL in urls {
-                try? FileManager.default.trashItem(at: fileURL, resultingItemURL: nil)
+                do {
+                    try FileManager.default.trashItem(at: fileURL, resultingItemURL: nil)
+                    succeeded += 1
+                } catch {
+                    failures.append("• \(fileURL.lastPathComponent): \(error.localizedDescription)")
+                }
             }
-            return true
+            if !failures.isEmpty {
+                DispatchQueue.main.async {
+                    Self.presentDragErrorAlert(title: L10n.dragTrashErrorTitle, details: failures)
+                }
+            }
+            return succeeded > 0
 
         default:
             return false
         }
     }
+
+    private static func presentDragErrorAlert(title: String, details: [String]) {
+        NSSound.beep()
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = title
+        alert.informativeText = details.prefix(6).joined(separator: "\n")
+        alert.addButton(withTitle: L10n.okBtn)
+        alert.runModal()
+    }
 }
 
-// MARK: - Clipped Root View & Per-Screen Dock Bar Panel
+// MARK: - Pure Dock Layout & Auto-Hide Geometry Engine
+
+enum DockLayoutMath {
+    static func tilePadAndGap(for iconSize: CGFloat) -> (pad: CGFloat, gap: CGFloat) {
+        if iconSize >= 34 {
+            return (2.5, 2.0)
+        } else {
+            return (1.5, 1.0)
+        }
+    }
+
+    static func barSize(for items: [DockItem], iconSize: CGFloat) -> NSSize {
+        let padX: CGFloat = 9
+        let pg = tilePadAndGap(for: iconSize)
+        var cursorX: CGFloat = padX
+        var lastWasTile = false
+        for item in items {
+            if item.kind == .separator {
+                if lastWasTile {
+                    cursorX -= pg.gap
+                }
+                cursorX += 11
+                lastWasTile = false
+            } else {
+                cursorX += (iconSize + pg.pad * 2) + pg.gap
+                lastWasTile = true
+            }
+        }
+        if lastWasTile {
+            cursorX -= pg.gap
+        }
+        let barWidth = max(60, cursorX + padX)
+        let barHeight = iconSize + 16
+        return NSSize(width: barWidth, height: barHeight)
+    }
+
+    /// Computes the largest icon size <= preferred whose rendered bar width fits within maxWidth,
+    /// using the exact same `barSize(for:iconSize:)` calculation used during layout.
+    static func computeEffectiveIconSize(items: [DockItem], preferred: CGFloat, maxWidth: CGFloat) -> CGFloat {
+        guard items.contains(where: { $0.kind != .separator }) else { return preferred }
+        if barSize(for: items, iconSize: preferred).width <= maxWidth {
+            return preferred
+        }
+
+        var candidate = floor(preferred)
+        while candidate > 20 {
+            if barSize(for: items, iconSize: candidate).width <= maxWidth {
+                return candidate
+            }
+            candidate -= 1
+        }
+        // Preserve 20 pt floor unless even 20 pt would overflow the display width
+        if barSize(for: items, iconSize: 20).width <= maxWidth {
+            return 20
+        }
+        candidate = 19
+        while candidate > 14 {
+            if barSize(for: items, iconSize: candidate).width <= maxWidth {
+                return candidate
+            }
+            candidate -= 1
+        }
+        return 14
+    }
+
+    static func triggerZone(screenFrame: NSRect, barSize: NSSize, hasScreenBelow: Bool) -> NSRect {
+        let minTriggerWidth = min(screenFrame.width - 24, screenFrame.width * 0.45)
+        let width = max(60, min(screenFrame.width - 24, max(minTriggerWidth, barSize.width + 64)))
+        let height: CGFloat = hasScreenBelow ? 26.0 : 20.0
+        return NSRect(
+            x: round(screenFrame.midX - width / 2),
+            y: screenFrame.minY,
+            width: width,
+            height: height
+        )
+    }
+
+    /// Always forms a strict geometric superset of `triggerZone` so resting the pointer anywhere inside
+    /// the bottom trigger strip can never oscillate between reveal and hide.
+    static func keepAliveZone(screenFrame: NSRect, barSize: NSSize, bottomMargin: CGFloat) -> NSRect {
+        let maxTrigger = triggerZone(screenFrame: screenFrame, barSize: barSize, hasScreenBelow: true)
+        let barKeepWidth = min(screenFrame.width, max(maxTrigger.width + 16, barSize.width + 80))
+        let barKeepHeight = max(maxTrigger.height + 12, bottomMargin + barSize.height + 24)
+        let barKeep = NSRect(
+            x: round(screenFrame.midX - barKeepWidth / 2),
+            y: screenFrame.minY,
+            width: barKeepWidth,
+            height: barKeepHeight
+        )
+        return barKeep.union(maxTrigger)
+    }
+}
 
 final class ClippedPassthroughRootView: NSView {
     weak var slidingContainer: NSView?
@@ -756,73 +899,29 @@ final class DockBarPanel: NSPanel {
     // MARK: - Trigger & Keep-Alive Zones on Screen
 
     func triggerZone(on screen: NSScreen, hasScreenBelow: Bool) -> NSRect {
-        let minTriggerWidth = screen.frame.width * 0.55
-        let width = min(screen.frame.width - 24, max(minTriggerWidth, currentBarSize.width + 80))
-        let height: CGFloat = hasScreenBelow ? 26.0 : 20.0
-        return NSRect(
-            x: round(screen.frame.midX - width / 2),
-            y: screen.frame.minY,
-            width: width,
-            height: height
+        DockLayoutMath.triggerZone(
+            screenFrame: screen.frame,
+            barSize: currentBarSize,
+            hasScreenBelow: hasScreenBelow
         )
     }
 
     func keepAliveZone(on screen: NSScreen) -> NSRect {
-        let width = min(screen.frame.width, currentBarSize.width + 56)
-        let height = DockSettings.shared.bottomMargin + currentBarSize.height + 24
-        return NSRect(
-            x: round(screen.frame.midX - width / 2),
-            y: screen.frame.minY,
-            width: width,
-            height: height
+        DockLayoutMath.keepAliveZone(
+            screenFrame: screen.frame,
+            barSize: currentBarSize,
+            bottomMargin: DockSettings.shared.bottomMargin
         )
     }
 
     // MARK: - Layout Calculations
 
-    private func tilePadAndGap(for iconSize: CGFloat) -> (pad: CGFloat, gap: CGFloat) {
-        if iconSize >= 34 {
-            return (2.5, 2.0)
-        } else {
-            return (1.5, 1.0)
-        }
-    }
-
     private func computeEffectiveIconSize(items: [DockItem], preferred: CGFloat, maxWidth: CGFloat) -> CGFloat {
-        let tileCount = CGFloat(items.filter { $0.kind != .separator }.count)
-        let sepCount = CGFloat(items.filter { $0.kind == .separator }.count)
-        guard tileCount > 0 else { return preferred }
-
-        let sidePadding: CGFloat = 18
-        let sepTotalWidth = sepCount * 11
-        let fullPG = tilePadAndGap(for: preferred)
-        let fullExtraPerTile = fullPG.pad * 2 + fullPG.gap
-
-        let naturalWidth = sidePadding + sepTotalWidth + tileCount * (preferred + fullExtraPerTile) - fullPG.gap
-        if naturalWidth <= maxWidth {
-            return preferred
-        }
-
-        let compactPG = tilePadAndGap(for: 26)
-        let compactExtraPerTile = compactPG.pad * 2 + compactPG.gap
-        let availableForIcons = maxWidth - sidePadding - sepTotalWidth + compactPG.gap - (tileCount * compactExtraPerTile)
-        return max(20, floor(availableForIcons / tileCount))
+        DockLayoutMath.computeEffectiveIconSize(items: items, preferred: preferred, maxWidth: maxWidth)
     }
 
     private func barSize(for items: [DockItem], iconSize: CGFloat) -> NSSize {
-        let padX: CGFloat = 9
-        let pg = tilePadAndGap(for: iconSize)
-        var cursorX: CGFloat = padX
-        for item in items {
-            if item.kind == .separator {
-                cursorX += 11
-            } else {
-                cursorX += (iconSize + pg.pad * 2) + pg.gap
-            }
-        }
-        let barWidth = max(60, cursorX - pg.gap + padX)
-        let barHeight = iconSize + 16
-        return NSSize(width: barWidth, height: barHeight)
+        DockLayoutMath.barSize(for: items, iconSize: iconSize)
     }
 
     private func rebuildSubviews(items: [DockItem], iconSize: CGFloat) {
@@ -830,7 +929,7 @@ final class DockBarPanel: NSPanel {
 
         let barSz = barSize(for: items, iconSize: iconSize)
         currentBarSize = barSz
-        let pg = tilePadAndGap(for: iconSize)
+        let pg = DockLayoutMath.tilePadAndGap(for: iconSize)
 
         slidingContainer.frame.size = NSSize(width: barSz.width, height: barSz.height + topHeadroom)
         shadowCarrier.frame = NSRect(x: 0, y: 0, width: barSz.width, height: barSz.height)
@@ -838,8 +937,12 @@ final class DockBarPanel: NSPanel {
         itemsContainer.frame = NSRect(x: 0, y: 0, width: barSz.width, height: barSz.height + topHeadroom)
 
         var cursorX: CGFloat = 9
+        var lastWasTile = false
         for item in items {
             if item.kind == .separator {
+                if lastWasTile {
+                    cursorX -= pg.gap
+                }
                 let sepView = NSView(frame: NSRect(
                     x: cursorX + 5.0,
                     y: 10,
@@ -850,11 +953,13 @@ final class DockBarPanel: NSPanel {
                 sepView.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.24).cgColor
                 itemsContainer.addSubview(sepView)
                 cursorX += 11
+                lastWasTile = false
             } else {
                 let tile = DockTileView(item: item, iconSize: iconSize, tilePadX: pg.pad)
                 tile.frame.origin = NSPoint(x: cursorX, y: 1)
                 itemsContainer.addSubview(tile)
                 cursorX += tile.frame.width + pg.gap
+                lastWasTile = true
             }
         }
     }

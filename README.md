@@ -34,9 +34,9 @@ Build from source also needs the Xcode Command Line Tools (`xcode-select --insta
 
 ### Download a release
 
-1. Download [`MultiScreenDock-v1.3.0-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.3.0/MultiScreenDock-v1.3.0-macOS.zip) from the [latest release](https://github.com/fgomsan/MultiScreenDock/releases/latest).
+1. Download [`MultiScreenDock-v1.3.1-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.3.1/MultiScreenDock-v1.3.1-macOS.zip) from the [latest release](https://github.com/fgomsan/MultiScreenDock/releases/latest).
 2. Unzip it and move `MultiScreenDock.app` to `/Applications`.
-3. The v1.3.0 app is ad-hoc signed (`codesign --sign -`) and has no Developer ID certificate and no notarization ticket. Gatekeeper blocks the quarantined download until you allow it once:
+3. The v1.3.1 app is ad-hoc signed (`codesign --sign -`) and has no Developer ID certificate and no notarization ticket yet. Gatekeeper blocks the quarantined download until you allow it once:
 
    ```bash
    xattr -dr com.apple.quarantine /Applications/MultiScreenDock.app
@@ -47,7 +47,7 @@ Build from source also needs the Xcode Command Line Tools (`xcode-select --insta
 
 ### Homebrew
 
-There is no `brew install --cask multiscreendock` from `homebrew/homebrew-cask` yet. A cask for the v1.3.0 zip is in [`packaging/homebrew/multiscreendock.rb`](packaging/homebrew/multiscreendock.rb). It can be installed from a checkout, or from a personal tap once `fgomsan/homebrew-tap` exists:
+There is no `brew install --cask multiscreendock` from `homebrew/homebrew-cask` yet. A cask for the v1.3.1 zip is in [`packaging/homebrew/multiscreendock.rb`](packaging/homebrew/multiscreendock.rb). It can be installed from a checkout, or from a personal tap once `fgomsan/homebrew-tap` exists:
 
 From a checkout of this repo:
 
@@ -69,6 +69,7 @@ brew install --cask multiscreendock
 ```bash
 git clone https://github.com/fgomsan/MultiScreenDock.git
 cd MultiScreenDock
+./Tests/run_tests.sh
 ./build.sh
 open ./MultiScreenDock.app
 ```
@@ -93,9 +94,9 @@ The menu-bar icon, a right-click on the bar, or **MultiScreenDock Settings** on 
 | Smooth hover magnification | Scale the icon under the pointer | On |
 | Show running unpinned apps | Append regular running apps that are not pinned | On |
 | Icon size | 28, 36, 44, or 52 pt | The system Dock's tile size, when that value is between 20 and 80 |
-| Active displays | Turn individual screens on or off | All non-primary screens |
+| Active displays | Turn individual screens on or off (persisted by hardware display UUID) | All non-primary screens |
 | Language | Automatic (macOS) or manual override (EN, ES, FR, DE, PT, IT, JA, ZH) | Automatic |
-| Launch at Login | Writes a per-user LaunchAgent | Off |
+| Launch at Login | Registers with `SMAppService.mainApp` (System Settings → Login Items) | Off |
 
 **Sync Dock Icons Now** (⌘R in the menu) re-reads the Dock plist immediately. Quit is ⌘Q in that menu.
 
@@ -107,7 +108,7 @@ Click behavior:
 - **Right-click** an item for Open/Show, Show in Finder, Hide, Quit, New Finder Window, or Empty Trash. The Trash's Empty item is enabled only when the Trash is not empty.
 - **Drag files** onto an app, a folder, or the Trash. A drop on a folder moves the files into that folder. A drop on the Trash uses `FileManager.trashItem`.
 
-The reveal strip sits on the bottom center of each enabled display. Its width is the wider of 55% of the display and the bar plus 80 pt, and it is never wider than the display minus 24 pt. It is 20 pt tall, or 26 pt when another display sits directly below. Corners outside that strip do not summon the bar. Once visible, the bar stays up while the pointer is over it, including a little padding around the bar, then waits out a hide delay (0.22 / 0.32 / 0.45 s).
+The reveal strip sits on the bottom center of each enabled display. Its width is the wider of 45% of the display and the bar plus 64 pt, and it is never wider than the display minus 24 pt. It is 20 pt tall, or 26 pt when another display sits directly below. Corners outside that strip do not summon the bar. Once visible, the keep-alive zone always forms a strict superset of the reveal strip plus padding around the bar, then waits out a hide delay (0.22 / 0.32 / 0.45 s).
 
 ## Permissions
 
@@ -119,11 +120,11 @@ macOS asks for **Automation** permission only when a feature sends Apple events:
 | --- | --- | --- |
 | Finder-icon click, and New Finder Window | Finder | A Finder click falls back to launching Finder.app. **New Finder Window** does not open a window. |
 | Empty Trash | Finder | The Trash stays as it is. Opening the Trash still works. |
-| Auto-hide Apple's native Dock | System Events | The app falls back to `defaults write com.apple.dock autohide` and `killall Dock`, which restarts the Dock. |
+| Auto-hide Apple's native Dock | System Events | Prompts you to either open System Settings → Automation or explicitly confirm restarting the Dock (`defaults write` + `killall Dock`). |
 
 `Info.plist` includes `NSAppleEventsUsageDescription` for that prompt. Reading `~/Library/Preferences/com.apple.dock.plist` uses your own preferences file and does not raise a permission dialog.
 
-**Launch at Login** writes `~/Library/LaunchAgents/io.github.fgomsan.multiscreendock.plist` with `RunAtLoad` and the absolute path of the binary. Moving or renaming the app later leaves that path stale until you toggle the setting off and on.
+**Launch at Login** uses Apple's `SMAppService.mainApp` API (visible in **System Settings → General → Login Items**). Any legacy `~/Library/LaunchAgents/io.github.fgomsan.multiscreendock.plist` from earlier versions is migrated and cleaned up automatically.
 
 ## Uninstall
 
@@ -152,13 +153,12 @@ brew uninstall --cask --zap multiscreendock
 
 - The bar is always centered on the **bottom** edge. A system Dock pinned to the left or right edge is not mirrored, and overlap detection only looks at the bottom `visibleFrame` inset.
 - This is a separate panel, not Apple's Dock process. There is no bounce, no notification badge, no download progress, no folder stack or fan (a folder opens in Finder), and no Dock spacers. Hover magnification scales the single icon under the pointer; it is not the system Dock's magnification curve.
-- Dropping files on a folder **moves** them (`FileManager.moveItem`). A name collision or a permissions error is ignored (`try?`).
+- Dropping files on a folder **moves** them (`FileManager.moveItem`). If a destination name collision or permission error occurs, the file stays in place and an alert reports which items could not be moved.
 - **Upper** / **Lower** in the displays menu is a label for screens whose `minY` is at least 600 points. The stacked-display dwell uses actual frame geometry, not that label.
 - The full-screen setting adds `fullScreenAuxiliary` at Dock window level. Some exclusive full-screen windows still cover the bar.
-- "Sync" follows the Dock plist and `NSWorkspace` notifications. It is not a private Dock API. A plist change is picked up on the next 0.8 second timer tick, or immediately from **Sync Dock Icons Now**.
+- "Sync" follows the Dock plist and `NSWorkspace` notifications. It is not a private Dock API. A plist change is picked up on the next 0.8 second timer tick, or immediately (clearing cached icons) from **Sync Dock Icons Now**.
 - While the pointer is moving, auto-hide evaluates at most about 60 times a second. A timer also fires every 0.8 seconds: it reloads icons when the Dock plist or the native Dock's bottom inset changed, and otherwise re-checks the pointer in auto-hide mode.
-- The app does not register a Service Management login item. Login launch is a LaunchAgent plist, and it stores an absolute path.
-- v1.3.0 is ad-hoc signed. Gatekeeper does not treat the downloaded zip as notarized software.
+- v1.3.1 is ad-hoc signed. Gatekeeper does not treat the downloaded zip as notarized software until Apple Developer ID notarization is enabled.
 - Interface strings are included for 8 languages (English, Spanish, French, German, Portuguese, Italian, Japanese, and Simplified Chinese). Other system locales fall back to English unless overridden in the **Language** submenu.
 
 ## FAQ
@@ -190,16 +190,16 @@ MultiScreenDock es una app de barra de menús, en Swift/AppKit, sin dependencias
 
 En pantallas apiladas, el borde inferior del monitor de arriba no es un tope físico. La barra espera un poco más en ese borde (90, 150 o 250 ms según la sensibilidad) para no abrirse cuando el cursor solo está de paso hacia el monitor de abajo.
 
-**Instalación.** Descarga [`MultiScreenDock-v1.3.0-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.3.0/MultiScreenDock-v1.3.0-macOS.zip), muévela a `/Applications` y, la primera vez:
+**Instalación.** Descarga [`MultiScreenDock-v1.3.1-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.3.1/MultiScreenDock-v1.3.1-macOS.zip), muévela a `/Applications` y, la primera vez:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/MultiScreenDock.app
 open /Applications/MultiScreenDock.app
 ```
 
-La versión 1.3.0 está firmada ad hoc, sin notarizar. Homebrew oficial todavía no sirve el cask; el archivo está en `packaging/homebrew/multiscreendock.rb`. Para compilar: `./build.sh` en macOS 13 o posterior, con las Command Line Tools.
+La versión 1.3.1 está firmada ad hoc, sin notarizar aún. Homebrew oficial todavía no sirve el cask; el archivo está en `packaging/homebrew/multiscreendock.rb`. Para compilar y ejecutar los tests: `./Tests/run_tests.sh && ./build.sh` en macOS 13 o posterior, con las Command Line Tools.
 
-**Permisos.** No pide Accesibilidad ni Grabación de Pantalla. macOS pedirá permiso de Automatización al controlar el Finder (clic en el icono de Finder, ventana nueva, vaciar la Papelera) o System Events (ocultar automáticamente el Dock del sistema). Si rechazas System Events, esa opción reinicia el Dock con `killall Dock`.
+**Permisos.** No pide Accesibilidad ni Grabación de Pantalla. macOS pedirá permiso de Automatización al controlar el Finder (clic en el icono de Finder, ventana nueva, vaciar la Papelera) o System Events (ocultar automáticamente el Dock del sistema). Si rechazas System Events, ofrece abrir Ajustes del Sistema o confirmar explícitamente el reinicio del Dock.
 
 **Uso.** Clic derecho sobre la barra, o el icono `dock.rectangle` en la barra de menús. Clic abre o activa. ⌘-clic muestra el ítem en el Finder (salvo Finder y la Papelera). ⌥-clic oculta la app si ya está delante. Arrastrar archivos a una carpeta los mueve dentro.
 

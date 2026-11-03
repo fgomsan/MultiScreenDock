@@ -644,4 +644,148 @@ enum L10n {
             zh: "清倒废纸篓…"
         )
     }
+
+    // MARK: - Alerts & Error Feedback
+    static var dragMoveErrorTitle: String {
+        tr(
+            en: "Could Not Move All Items",
+            es: "No se pudieron mover todos los archivos",
+            fr: "Impossible de déplacer tous les éléments",
+            de: "Nicht alle Objekte konnten bewegt werden",
+            pt: "Não foi possível mover todos os itens",
+            it: "Impossibile spostare tutti gli elementi",
+            ja: "一部の項目を移動できませんでした",
+            zh: "无法移动部分项目"
+        )
+    }
+
+    static var dragTrashErrorTitle: String {
+        tr(
+            en: "Could Not Move Items to Trash",
+            es: "No se pudieron enviar los archivos a la Papelera",
+            fr: "Impossible de placer les éléments dans la corbeille",
+            de: "Objekte konnten nicht in den Papierkorb gelegt werden",
+            pt: "Não foi possível mover os itens para o Lixo",
+            it: "Impossibile spostare gli elementi nel Cestino",
+            ja: "項目をゴミ箱に入れられませんでした",
+            zh: "无法将项目移到废纸篓"
+        )
+    }
+
+    static var dragOpenErrorTitle: String {
+        tr(
+            en: "Could Not Open Items",
+            es: "No se pudieron abrir los archivos",
+            fr: "Impossible d’ouvrir les éléments",
+            de: "Objekte konnten nicht geöffnet werden",
+            pt: "Não foi possível abrir os itens",
+            it: "Impossibile aprire gli elementi",
+            ja: "項目を開けませんでした",
+            zh: "无法打开项目"
+        )
+    }
+
+    static var dockAutohidePermTitle: String {
+        tr(
+            en: "Automation Permission Denied",
+            es: "Permiso de Automatización denegado",
+            fr: "Autorisation d’automatisation refusée",
+            de: "Automatisierungsberechtigung verweigert",
+            pt: "Permissão de Automação negada",
+            it: "Autorizzazione Automazione negata",
+            ja: "オートメーションの許可がありません",
+            zh: "自动化权限被拒绝"
+        )
+    }
+
+    static var dockAutohidePermMessage: String {
+        tr(
+            en: "MultiScreenDock could not ask System Events to toggle Apple's Dock smoothly. You can grant Automation permission in System Settings, or apply the preference now by restarting Apple's Dock.",
+            es: "MultiScreenDock no pudo cambiar el Dock de Apple suavemente mediante System Events. Puedes conceder permiso en Ajustes del Sistema o aplicarlo ahora reiniciando el proceso del Dock.",
+            fr: "MultiScreenDock n’a pas pu modifier le Dock via System Events. Vous pouvez accorder l’accès dans Réglages Système ou redémarrer le Dock maintenant.",
+            de: "MultiScreenDock konnte das Apple-Dock nicht über System Events umschalten. Sie können die Berechtigung in den Systemeinstellungen erteilen oder das Dock jetzt neu starten.",
+            pt: "O MultiScreenDock não pôde alternar o Dock da Apple via System Events. Você pode conceder permissão nos Ajustes do Sistema ou reiniciar o Dock agora.",
+            it: "MultiScreenDock non ha potuto modificare il Dock tramite System Events. Puoi concedere il permesso in Impostazioni di Sistema o riavviare il Dock ora.",
+            ja: "System Events経由でApple標準Dockを切り替えられませんでした。システム設定で許可するか、Dockを再起動して今すぐ適用できます。",
+            zh: "无法通过 System Events 平滑切换原生程序坞。您可以在系统设置中授予自动化权限，或立即重启原生程序坞以应用更改。"
+        )
+    }
+
+    static var dockAutohideRestartBtn: String {
+        tr(
+            en: "Restart Dock Now",
+            es: "Reiniciar el Dock ahora",
+            fr: "Redémarrer le Dock",
+            de: "Dock jetzt neu starten",
+            pt: "Reiniciar Dock agora",
+            it: "Riavvia il Dock ora",
+            ja: "Dockを今すぐ再起動",
+            zh: "立即重启程序坞"
+        )
+    }
+
+    static var openAutomationSettingsBtn: String {
+        tr(
+            en: "Open System Settings",
+            es: "Abrir Ajustes del Sistema",
+            fr: "Ouvrir Réglages Système",
+            de: "Systemeinstellungen öffnen",
+            pt: "Abrir Ajustes do Sistema",
+            it: "Apri Impostazioni di Sistema",
+            ja: "システム設定を開く",
+            zh: "打开系统设置"
+        )
+    }
+
+    static var cancelBtn: String {
+        tr(
+            en: "Cancel",
+            es: "Cancelar",
+            fr: "Annuler",
+            de: "Abbrechen",
+            pt: "Cancelar",
+            it: "Annulla",
+            ja: "キャンセル",
+            zh: "取消"
+        )
+    }
+
+    static var okBtn: String {
+        tr(
+            en: "OK",
+            es: "Aceptar",
+            fr: "OK",
+            de: "OK",
+            pt: "OK",
+            it: "OK",
+            ja: "OK",
+            zh: "好"
+        )
+    }
+
+    static var loginItemErrorTitle: String {
+        tr(
+            en: "Could Not Update Login Item",
+            es: "No se pudo actualizar el inicio automático",
+            fr: "Impossible de modifier l’ouverture à la connexion",
+            de: "Anmeldeobjekt konnte nicht geändert werden",
+            pt: "Não foi possível alterar o item de início",
+            it: "Impossibile aggiornare l’elemento di login",
+            ja: "ログイン項目を更新できませんでした",
+            zh: "无法更新登录项"
+        )
+    }
+
+    static var loginItemRequiresApprovalBadge: String {
+        tr(
+            en: " (Approve in System Settings)",
+            es: " (Aprobar en Ajustes del Sistema)",
+            fr: " (À autoriser dans Réglages Système)",
+            de: " (In Systemeinstellungen erlauben)",
+            pt: " (Aprovar nos Ajustes do Sistema)",
+            it: " (Approva in Impostazioni di Sistema)",
+            ja: "（システム設定で許可が必要）",
+            zh: "（需在系统设置中批准）"
+        )
+    }
 }

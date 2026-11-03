@@ -25,6 +25,40 @@ struct DockItem: Equatable {
     }
 }
 
+enum AppInstanceMatcher {
+    static func normalizedPath(_ url: URL) -> String {
+        url.resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
+    /// Matches a running app instance by exact bundle path first. Falls back to bundleIdentifier only when
+    /// macOS mounts a system app via Cryptex/System firmlinks (e.g. Safari) with the same bundle filename,
+    /// preventing two distinct copies of an app (e.g. Xcode vs Xcode-beta) from confusing Hide/Quit/dots.
+    static func preferredIndex(
+        targetBundleID: String?,
+        targetURL: URL,
+        candidates: [(bundleID: String?, bundleURL: URL?)]
+    ) -> Int? {
+        let targetNorm = normalizedPath(targetURL)
+        if let exactIdx = candidates.firstIndex(where: { cand in
+            guard let u = cand.bundleURL else { return false }
+            return normalizedPath(u) == targetNorm
+        }) {
+            return exactIdx
+        }
+
+        guard let bid = targetBundleID, !bid.isEmpty else { return nil }
+        let targetName = targetURL.lastPathComponent
+        return candidates.firstIndex(where: { cand in
+            guard cand.bundleID == bid else { return false }
+            guard let candURL = cand.bundleURL else { return true }
+            let candPath = candURL.standardizedFileURL.path
+            let isSystemAlias = (candPath.hasPrefix("/System/") || targetNorm.hasPrefix("/System/"))
+                && candURL.lastPathComponent == targetName
+            return isSystemAlias
+        })
+    }
+}
+
 final class DockModelReader {
     static let shared = DockModelReader()
 
@@ -56,7 +90,10 @@ final class DockModelReader {
         return false
     }
 
-    func reloadPlistCache() {
+    func reloadPlistCache(clearIcons: Bool = false) {
+        if clearIcons {
+            iconCache.removeAll()
+        }
         if let attrs = try? FileManager.default.attributesOfItem(atPath: dockPlistURL.path),
            let modDate = attrs[.modificationDate] as? Date {
             lastPlistModDate = modDate
@@ -116,33 +153,38 @@ final class DockModelReader {
         cachedPersistentOthers = othersResult
     }
 
+    static func findRunningApplication(
+        bundleID: String?,
+        url: URL,
+        among apps: [NSRunningApplication] = NSWorkspace.shared.runningApplications
+    ) -> NSRunningApplication? {
+        let live = apps.filter { !$0.isTerminated }
+        let pairs = live.map { (bundleID: $0.bundleIdentifier, bundleURL: $0.bundleURL) }
+        guard let idx = AppInstanceMatcher.preferredIndex(
+            targetBundleID: bundleID,
+            targetURL: url,
+            candidates: pairs
+        ) else {
+            return nil
+        }
+        return live[idx]
+    }
+
     func buildItems(includeUnpinnedRunning: Bool) -> [DockItem] {
         let workspace = NSWorkspace.shared
-        let runningApps = workspace.runningApplications
+        let runningApps = workspace.runningApplications.filter { !$0.isTerminated }
+        let frontmostPID = workspace.frontmostApplication?.processIdentifier
         let frontmostBundleID = workspace.frontmostApplication?.bundleIdentifier
-        let frontmostURL = workspace.frontmostApplication?.bundleURL?.standardizedFileURL
-
-        var runningBundleIDs = Set<String>()
-        var runningURLs = Set<URL>()
-
-        for app in runningApps where !app.isTerminated {
-            if let bid = app.bundleIdentifier {
-                runningBundleIDs.insert(bid)
-            }
-            if let u = app.bundleURL?.standardizedFileURL {
-                runningURLs.insert(u)
-            }
-        }
 
         var items: [DockItem] = []
-        var representedBundleIDs = Set<String>()
-        var representedURLs = Set<URL>()
+        var claimedPIDs = Set<pid_t>()
 
         // 1. Finder (siempre primero en macOS)
         let finderBundleID = "com.apple.finder"
         let finderURL = URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app")
-        representedBundleIDs.insert(finderBundleID)
-        representedURLs.insert(finderURL.standardizedFileURL)
+        if let finderApp = runningApps.first(where: { $0.bundleIdentifier == finderBundleID }) {
+            claimedPIDs.insert(finderApp.processIdentifier)
+        }
         items.append(DockItem(
             id: "finder",
             label: "Finder",
@@ -155,12 +197,13 @@ final class DockModelReader {
         // 2. Apps ancladas en com.apple.dock (persistent-apps)
         for (idx, entry) in cachedPersistentApps.enumerated() {
             if entry.bundleID == finderBundleID { continue }
-            let stdURL = entry.url.standardizedFileURL
-            if let bid = entry.bundleID { representedBundleIDs.insert(bid) }
-            representedURLs.insert(stdURL)
 
-            let running = (entry.bundleID.map { runningBundleIDs.contains($0) } ?? false) || runningURLs.contains(stdURL)
-            let front = (entry.bundleID != nil && entry.bundleID == frontmostBundleID) || (stdURL == frontmostURL)
+            let matchedApp = Self.findRunningApplication(bundleID: entry.bundleID, url: entry.url, among: runningApps)
+            if let matched = matchedApp {
+                claimedPIDs.insert(matched.processIdentifier)
+            }
+            let running = (matchedApp != nil)
+            let front = (matchedApp != nil && matchedApp?.processIdentifier == frontmostPID)
 
             items.append(DockItem(
                 id: "pinned-\(entry.bundleID ?? entry.url.path)-\(idx)",
@@ -172,29 +215,25 @@ final class DockModelReader {
             ))
         }
 
-        // 3. Apps regulares abiertas que no están ancladas
+        // 3. Apps regulares abiertas que no están ancladas (incluye copias adicionales en otra ruta)
         if includeUnpinnedRunning {
             let ownBundleID = Bundle.main.bundleIdentifier ?? DockSettings.bundleIdentifier
             var extraItems: [DockItem] = []
             for app in runningApps {
-                guard app.activationPolicy == .regular, !app.isTerminated else { continue }
+                guard app.activationPolicy == .regular else { continue }
+                if claimedPIDs.contains(app.processIdentifier) { continue }
                 let bid = app.bundleIdentifier
-                if bid == ownBundleID || bid == "com.apple.dock" { continue }
-                let stdURL = app.bundleURL?.standardizedFileURL
-
-                if let bid = bid, representedBundleIDs.contains(bid) { continue }
-                if let stdURL = stdURL, representedURLs.contains(stdURL) { continue }
+                if bid == ownBundleID || bid == "com.apple.dock" || bid == finderBundleID { continue }
                 guard let appURL = app.bundleURL else { continue }
 
-                if let bid = bid { representedBundleIDs.insert(bid) }
-                if let stdURL = stdURL { representedURLs.insert(stdURL) }
+                claimedPIDs.insert(app.processIdentifier)
 
                 let name = app.localizedName ?? appURL.deletingPathExtension().lastPathComponent
-                let front = (bid != nil && bid == frontmostBundleID) || (stdURL == frontmostURL)
+                let front = (app.processIdentifier == frontmostPID)
                 let icon = app.icon ?? iconForFile(appURL.path)
 
                 extraItems.append(DockItem(
-                    id: "running-\(bid ?? appURL.path)",
+                    id: "running-\(app.processIdentifier)-\(appURL.path)",
                     label: name,
                     kind: .application(bundleID: bid, url: appURL),
                     icon: icon,

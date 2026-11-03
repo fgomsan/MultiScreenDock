@@ -238,7 +238,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         reloadItem.target = self
         menu.addItem(reloadItem)
 
-        let loginItem = NSMenuItem(title: L10n.launchAtLogin, action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
+        let loginTitle = settings.launchAtLoginRequiresApproval
+            ? "\(L10n.launchAtLogin)\(L10n.loginItemRequiresApprovalBadge)"
+            : L10n.launchAtLogin
+        let loginItem = NSMenuItem(title: loginTitle, action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         loginItem.target = self
         loginItem.state = settings.launchAtLogin ? .on : .off
         menu.addItem(loginItem)
@@ -319,7 +322,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func reloadNow() {
-        DockModelReader.shared.reloadPlistCache()
+        DockModelReader.shared.reloadPlistCache(clearIcons: true)
         MultiScreenController.shared.refreshAll(forceLayout: true)
     }
 

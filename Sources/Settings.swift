@@ -1,4 +1,6 @@
 import Cocoa
+import ColorSync
+import ServiceManagement
 
 enum DockVisibilityMode: String {
     case alwaysVisible = "alwaysVisible"
@@ -103,6 +105,7 @@ final class DockSettings {
             Keys.disabledScreens: [String](),
             Keys.appLanguage: AppLanguage.system.rawValue
         ])
+        migrateLegacyLaunchAgentIfNeeded()
     }
 
     private static func readNativeTileSize() -> Double? {
@@ -225,16 +228,41 @@ final class DockSettings {
         }
     }
 
+    private func displayID(for screen: NSScreen) -> CGDirectDisplayID? {
+        guard let num = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
+            return nil
+        }
+        return CGDirectDisplayID(num.uint32Value)
+    }
+
+    private func legacyScreenKey(for screen: NSScreen) -> String {
+        if let id = displayID(for: screen) {
+            return "\(screen.localizedName)#\(id)"
+        }
+        return screen.localizedName
+    }
+
+    /// Persistent hardware identifier across macOS reboots using ColorSync/EDID display UUID.
     func screenKey(for screen: NSScreen) -> String {
-        if let num = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {
-            return "\(screen.localizedName)#\(num.uint32Value)"
+        if let id = displayID(for: screen) {
+            if let unmanagedUUID = CGDisplayCreateUUIDFromDisplayID(id) {
+                let uuid = unmanagedUUID.takeRetainedValue()
+                if let cfStr = CFUUIDCreateString(nil, uuid) {
+                    return "uuid:\(cfStr as String)"
+                }
+            }
+            let vendor = CGDisplayVendorNumber(id)
+            let model = CGDisplayModelNumber(id)
+            let serial = CGDisplaySerialNumber(id)
+            let builtin = CGDisplayIsBuiltin(id)
+            return "hw:\(vendor)-\(model)-\(serial)-\(builtin)-\(screen.localizedName)"
         }
         return screen.localizedName
     }
 
     func isPrimaryDisplay(_ screen: NSScreen) -> Bool {
-        if let num = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber {
-            return CGDirectDisplayID(num.uint32Value) == CGMainDisplayID()
+        if let id = displayID(for: screen) {
+            return id == CGMainDisplayID()
         }
         return screen === NSScreen.screens.first
     }
@@ -243,23 +271,40 @@ final class DockSettings {
         if skipPrimaryDisplay && isPrimaryDisplay(screen) {
             return false
         }
-        return !disabledScreens.contains(screenKey(for: screen))
+        let persistentKey = screenKey(for: screen)
+        let current = disabledScreens
+        if current.contains(persistentKey) {
+            return false
+        }
+        let legacyKey = legacyScreenKey(for: screen)
+        if legacyKey != persistentKey && current.contains(legacyKey) {
+            var migrated = current
+            migrated.remove(legacyKey)
+            migrated.insert(persistentKey)
+            defaults.set(Array(migrated), forKey: Keys.disabledScreens)
+            return false
+        }
+        return true
     }
 
     func toggleScreen(_ screen: NSScreen) {
+        let persistentKey = screenKey(for: screen)
+        let legacyKey = legacyScreenKey(for: screen)
         if isPrimaryDisplay(screen) && skipPrimaryDisplay {
             skipPrimaryDisplay = false
             var current = disabledScreens
-            current.remove(screenKey(for: screen))
+            current.remove(persistentKey)
+            current.remove(legacyKey)
             disabledScreens = current
             return
         }
-        let key = screenKey(for: screen)
         var current = disabledScreens
-        if current.contains(key) {
-            current.remove(key)
+        let wasDisabled = current.contains(persistentKey) || current.contains(legacyKey)
+        current.remove(legacyKey)
+        if wasDisabled {
+            current.remove(persistentKey)
         } else {
-            current.insert(key)
+            current.insert(persistentKey)
         }
         disabledScreens = current
     }
@@ -283,45 +328,89 @@ final class DockSettings {
                 return
             }
         }
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
-        proc.arguments = ["write", "com.apple.dock", "autohide", "-bool", enabled ? "true" : "false"]
-        try? proc.run()
-        proc.waitUntilExit()
 
-        let killProc = Process()
-        killProc.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
-        killProc.arguments = ["Dock"]
-        try? killProc.run()
+        // Ask explicit user confirmation before restarting Apple's Dock process
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = L10n.dockAutohidePermTitle
+        alert.informativeText = L10n.dockAutohidePermMessage
+        alert.addButton(withTitle: L10n.dockAutohideRestartBtn)
+        alert.addButton(withTitle: L10n.openAutomationSettingsBtn)
+        alert.addButton(withTitle: L10n.cancelBtn)
+
+        let choice = alert.runModal()
+        if choice == .alertFirstButtonReturn {
+            let proc = Process()
+            proc.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
+            proc.arguments = ["write", "com.apple.dock", "autohide", "-bool", enabled ? "true" : "false"]
+            try? proc.run()
+            proc.waitUntilExit()
+
+            let killProc = Process()
+            killProc.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
+            killProc.arguments = ["Dock"]
+            try? killProc.run()
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                self?.onChange?()
+            }
+        } else if choice == .alertSecondButtonReturn {
+            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
+                NSWorkspace.shared.open(url)
+            }
+        }
     }
 
-    // MARK: - Launch at Login (LaunchAgent)
+    // MARK: - Launch at Login (SMAppService on macOS 13+ with Legacy LaunchAgent Migration)
 
-    private var launchAgentURL: URL {
+    private var legacyLaunchAgentURL: URL {
         let home = FileManager.default.homeDirectoryForCurrentUser
         return home.appendingPathComponent("Library/LaunchAgents/\(Self.launchAgentLabel).plist")
     }
 
+    private func migrateLegacyLaunchAgentIfNeeded() {
+        let fm = FileManager.default
+        guard fm.fileExists(atPath: legacyLaunchAgentURL.path) else { return }
+        try? fm.removeItem(at: legacyLaunchAgentURL)
+        if SMAppService.mainApp.status != .enabled {
+            try? SMAppService.mainApp.register()
+        }
+    }
+
+    var launchAtLoginRequiresApproval: Bool {
+        SMAppService.mainApp.status == .requiresApproval
+    }
+
     var launchAtLogin: Bool {
-        get { FileManager.default.fileExists(atPath: launchAgentURL.path) }
+        get {
+            let status = SMAppService.mainApp.status
+            return status == .enabled || status == .requiresApproval
+        }
         set {
             let fm = FileManager.default
-            if newValue {
-                guard let execPath = Bundle.main.executablePath else { return }
-                let plist: [String: Any] = [
-                    "Label": Self.launchAgentLabel,
-                    "ProgramArguments": [execPath],
-                    "RunAtLoad": true,
-                    "KeepAlive": false,
-                    "ProcessType": "Interactive"
-                ]
-                try? fm.createDirectory(at: launchAgentURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-                if let data = try? PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0) {
-                    try? data.write(to: launchAgentURL)
-                }
-            } else {
-                try? fm.removeItem(at: launchAgentURL)
+            if fm.fileExists(atPath: legacyLaunchAgentURL.path) {
+                try? fm.removeItem(at: legacyLaunchAgentURL)
             }
+            do {
+                if newValue {
+                    try SMAppService.mainApp.register()
+                    if SMAppService.mainApp.status == .requiresApproval {
+                        SMAppService.openSystemSettingsLoginItems()
+                    }
+                } else {
+                    try SMAppService.mainApp.unregister()
+                }
+            } catch {
+                NSSound.beep()
+                NSApp.activate(ignoringOtherApps: true)
+                let alert = NSAlert()
+                alert.alertStyle = .warning
+                alert.messageText = L10n.loginItemErrorTitle
+                alert.informativeText = error.localizedDescription
+                alert.addButton(withTitle: L10n.okBtn)
+                alert.runModal()
+            }
+            onChange?()
         }
     }
 }

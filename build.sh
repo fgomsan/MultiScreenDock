@@ -139,9 +139,9 @@ cat > "${CONTENTS_DIR}/Info.plist" << 'EOF'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.3.0</string>
+    <string>1.3.1</string>
     <key>CFBundleVersion</key>
-    <string>4</string>
+    <string>5</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>
@@ -165,8 +165,10 @@ SOURCES=(
     "${PROJECT_DIR}/Sources/main.swift"
 )
 
-swiftc -O -target arm64-apple-macos13.0 -framework Cocoa -framework QuartzCore "${SOURCES[@]}" -o "${BUILD_TMP}/${APP_NAME}-arm64"
-swiftc -O -target x86_64-apple-macos13.0 -framework Cocoa -framework QuartzCore "${SOURCES[@]}" -o "${BUILD_TMP}/${APP_NAME}-x86_64"
+FRAMEWORKS=(-framework Cocoa -framework QuartzCore -framework ColorSync -framework ServiceManagement)
+
+swiftc -O -target arm64-apple-macos13.0 "${FRAMEWORKS[@]}" "${SOURCES[@]}" -o "${BUILD_TMP}/${APP_NAME}-arm64"
+swiftc -O -target x86_64-apple-macos13.0 -Xlinker -w "${FRAMEWORKS[@]}" "${SOURCES[@]}" -o "${BUILD_TMP}/${APP_NAME}-x86_64"
 lipo -create -output "${MACOS_DIR}/${APP_NAME}" "${BUILD_TMP}/${APP_NAME}-arm64" "${BUILD_TMP}/${APP_NAME}-x86_64"
 
 xattr -cr "${APP_BUNDLE}"

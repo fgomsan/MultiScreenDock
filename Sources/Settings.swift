@@ -5,6 +5,32 @@ enum DockVisibilityMode: String {
     case autoHide = "autoHide"
 }
 
+enum AppLanguage: String, CaseIterable {
+    case system = "system"
+    case en = "en"
+    case es = "es"
+    case fr = "fr"
+    case de = "de"
+    case pt = "pt"
+    case it = "it"
+    case ja = "ja"
+    case zhHans = "zh-Hans"
+
+    var nativeDisplayName: String {
+        switch self {
+        case .system: return ""
+        case .en: return "English"
+        case .es: return "Español"
+        case .fr: return "Français"
+        case .de: return "Deutsch"
+        case .pt: return "Português"
+        case .it: return "Italiano"
+        case .ja: return "日本語"
+        case .zhHans: return "简体中文"
+        }
+    }
+}
+
 enum AutoHideResponsiveness: String {
     case fast = "fast"
     case balanced = "balanced"
@@ -56,6 +82,7 @@ final class DockSettings {
         static let showRunningUnpinned = "showRunningUnpinned"
         static let bottomMargin = "bottomMargin"
         static let disabledScreens = "disabledScreens"
+        static let appLanguage = "appLanguage"
     }
 
     var onChange: (() -> Void)?
@@ -73,7 +100,8 @@ final class DockSettings {
             Keys.hoverMagnification: true,
             Keys.showRunningUnpinned: true,
             Keys.bottomMargin: 6.0,
-            Keys.disabledScreens: [String]()
+            Keys.disabledScreens: [String](),
+            Keys.appLanguage: AppLanguage.system.rawValue
         ])
     }
 
@@ -179,6 +207,20 @@ final class DockSettings {
         get { Set(defaults.stringArray(forKey: Keys.disabledScreens) ?? []) }
         set {
             defaults.set(Array(newValue), forKey: Keys.disabledScreens)
+            onChange?()
+        }
+    }
+
+    var appLanguage: AppLanguage {
+        get {
+            guard let raw = defaults.string(forKey: Keys.appLanguage),
+                  let lang = AppLanguage(rawValue: raw) else {
+                return .system
+            }
+            return lang
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Keys.appLanguage)
             onChange?()
         }
     }

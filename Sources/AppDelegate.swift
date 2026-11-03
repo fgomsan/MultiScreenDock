@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func populateSettingsMenu(_ menu: NSMenu) {
         menu.removeAllItems()
+        statusItem?.button?.toolTip = L10n.tooltipStatus
         let settings = DockSettings.shared
         let counts = MultiScreenController.shared.statusCounts()
         let nativeAutohide = settings.isNativeDockAutohideEnabled
@@ -210,6 +211,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         screensParent.submenu = screensSubmenu
         menu.addItem(screensParent)
 
+        // Language Submenu
+        let langSubmenu = NSMenu()
+        let autoTitle = L10n.languageSystemAuto(L10n.systemDetectedLanguage.nativeDisplayName)
+        let autoItem = NSMenuItem(title: autoTitle, action: #selector(selectAppLanguage(_:)), keyEquivalent: "")
+        autoItem.target = self
+        autoItem.representedObject = AppLanguage.system.rawValue
+        autoItem.state = (settings.appLanguage == .system) ? .on : .off
+        langSubmenu.addItem(autoItem)
+        langSubmenu.addItem(.separator())
+
+        for lang in AppLanguage.allCases where lang != .system {
+            let lItem = NSMenuItem(title: lang.nativeDisplayName, action: #selector(selectAppLanguage(_:)), keyEquivalent: "")
+            lItem.target = self
+            lItem.representedObject = lang.rawValue
+            lItem.state = (settings.appLanguage == lang) ? .on : .off
+            langSubmenu.addItem(lItem)
+        }
+        let langParent = NSMenuItem(title: L10n.languageMenu, action: nil, keyEquivalent: "")
+        langParent.submenu = langSubmenu
+        menu.addItem(langParent)
+
         menu.addItem(.separator())
 
         let reloadItem = NSMenuItem(title: L10n.syncNow, action: #selector(reloadNow), keyEquivalent: "r")
@@ -220,6 +242,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         loginItem.target = self
         loginItem.state = settings.launchAtLogin ? .on : .off
         menu.addItem(loginItem)
+
+        menu.addItem(.separator())
+
+        let coffeeItem = NSMenuItem(title: L10n.buyMeACoffee, action: #selector(openBuyMeACoffee), keyEquivalent: "")
+        coffeeItem.target = self
+        if let cup = NSImage(systemSymbolName: "cup.and.saucer", accessibilityDescription: nil) {
+            cup.isTemplate = true
+            coffeeItem.image = cup
+        }
+        menu.addItem(coffeeItem)
 
         menu.addItem(.separator())
 
@@ -293,6 +325,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleLaunchAtLogin() {
         DockSettings.shared.launchAtLogin.toggle()
+    }
+
+    @objc private func selectAppLanguage(_ sender: NSMenuItem) {
+        if let raw = sender.representedObject as? String,
+           let lang = AppLanguage(rawValue: raw) {
+            DockSettings.shared.appLanguage = lang
+            statusItem?.button?.toolTip = L10n.tooltipStatus
+        }
+    }
+
+    @objc private func openBuyMeACoffee() {
+        NSWorkspace.shared.open(L10n.buyMeACoffeeURL)
     }
 
     @objc private func quitApp() {

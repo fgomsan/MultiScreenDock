@@ -1,12 +1,12 @@
-# Personal-tap cask for the v1.2.0 GitHub release asset.
-# sha256 is of MultiScreenDock-v1.2.0-macOS.zip (492,962 bytes), computed
+# Personal-tap cask for the v1.3.0 GitHub release asset.
+# sha256 is of MultiScreenDock-v1.3.0-macOS.zip (519,699 bytes), computed
 # from the downloaded asset. Both slices inside are ad-hoc signed
 # (CS_ADHOC, empty CMS signature, no Team ID, no notarization ticket),
 # so homebrew/homebrew-cask will reject this until a Developer ID build
 # is published. Recompute sha256 when that zip replaces the asset.
 cask "multiscreendock" do
-  version "1.2.0"
-  sha256 "95ef7ecf5b2167b4ec68b0d08f7f4a3c506fd2dae9dfb2c507cd6b320b55d6ab"
+  version "1.3.0"
+  sha256 "3072cb93821696fee90a57a19c0a6a84db072781266571408c3468986f271007"
 
   url "https://github.com/fgomsan/MultiScreenDock/releases/download/v#{version}/MultiScreenDock-v#{version}-macOS.zip"
   name "MultiScreenDock"

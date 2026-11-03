@@ -4,6 +4,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B%20Universal-blue)](#requirements)
 [![Build](https://github.com/fgomsan/MultiScreenDock/actions/workflows/build.yml/badge.svg)](https://github.com/fgomsan/MultiScreenDock/actions/workflows/build.yml)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/fgomsan)
 
 **The macOS Dock only shows on one display.** MultiScreenDock is a native Swift/AppKit menu-bar app that keeps a live copy of that Dock on every connected monitor, including stacked upper displays where the pointer never hits a screen edge and the system Dock cannot appear.
 
@@ -19,7 +20,7 @@
 - **Settings where your hand already is.** Right-click the bar, Control-click it, or open **MultiScreenDock Settings** at the bottom of an icon's menu. The same menu is on the menu-bar icon (`dock.rectangle`, or the title "Dock+" if that symbol is missing). Per-display toggles, icon size (28 / 36 / 44 / 52 pt, scaled down to fit a narrow screen, floor 20 pt), hover magnification, and launch at login live there.
 - **Clicks that match the Dock closely enough to use.** Click launches or activates. Command-click reveals an app, file, or folder in Finder. Option-click hides an app when that app is already frontmost. Right-click can open, show in Finder, hide, quit, open a Finder window, or empty the Trash. Drop files on an app to open them with it, on a folder to move them into it, or on the Trash to trash them.
 - **A panel that does not take focus.** The bar is a non-activating `NSPanel`. Hovering it leaves the current app active. The label under the pointer is the item name. Hover magnification scales that one icon to 1.18×.
-- **English and Spanish**, chosen from the first preferred language (`en` / `es`).
+- **8 languages built in** (English, Español, Français, Deutsch, Português, Italiano, 日本語, and 简体中文), detected automatically from macOS or switched manually at any time from the **Language** submenu.
 
 ## Requirements
 
@@ -33,9 +34,9 @@ Build from source also needs the Xcode Command Line Tools (`xcode-select --insta
 
 ### Download a release
 
-1. Download [`MultiScreenDock-v1.2.0-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.2.0/MultiScreenDock-v1.2.0-macOS.zip) from the [latest release](https://github.com/fgomsan/MultiScreenDock/releases/latest).
+1. Download [`MultiScreenDock-v1.3.0-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.3.0/MultiScreenDock-v1.3.0-macOS.zip) from the [latest release](https://github.com/fgomsan/MultiScreenDock/releases/latest).
 2. Unzip it and move `MultiScreenDock.app` to `/Applications`.
-3. The v1.2.0 app is ad-hoc signed (`codesign --sign -`) and has no Developer ID certificate and no notarization ticket. Gatekeeper blocks the quarantined download until you allow it once:
+3. The v1.3.0 app is ad-hoc signed (`codesign --sign -`) and has no Developer ID certificate and no notarization ticket. Gatekeeper blocks the quarantined download until you allow it once:
 
    ```bash
    xattr -dr com.apple.quarantine /Applications/MultiScreenDock.app
@@ -46,7 +47,7 @@ Build from source also needs the Xcode Command Line Tools (`xcode-select --insta
 
 ### Homebrew
 
-There is no `brew install --cask multiscreendock` from `homebrew/homebrew-cask` yet. A cask for the v1.2.0 zip is in [`packaging/homebrew/multiscreendock.rb`](packaging/homebrew/multiscreendock.rb). It can be installed from a checkout, or from a personal tap once `fgomsan/homebrew-tap` exists:
+There is no `brew install --cask multiscreendock` from `homebrew/homebrew-cask` yet. A cask for the v1.3.0 zip is in [`packaging/homebrew/multiscreendock.rb`](packaging/homebrew/multiscreendock.rb). It can be installed from a checkout, or from a personal tap once `fgomsan/homebrew-tap` exists:
 
 From a checkout of this repo:
 
@@ -93,6 +94,7 @@ The menu-bar icon, a right-click on the bar, or **MultiScreenDock Settings** on 
 | Show running unpinned apps | Append regular running apps that are not pinned | On |
 | Icon size | 28, 36, 44, or 52 pt | The system Dock's tile size, when that value is between 20 and 80 |
 | Active displays | Turn individual screens on or off | All non-primary screens |
+| Language | Automatic (macOS) or manual override (EN, ES, FR, DE, PT, IT, JA, ZH) | Automatic |
 | Launch at Login | Writes a per-user LaunchAgent | Off |
 
 **Sync Dock Icons Now** (⌘R in the menu) re-reads the Dock plist immediately. Quit is ⌘Q in that menu.
@@ -156,8 +158,8 @@ brew uninstall --cask --zap multiscreendock
 - "Sync" follows the Dock plist and `NSWorkspace` notifications. It is not a private Dock API. A plist change is picked up on the next 0.8 second timer tick, or immediately from **Sync Dock Icons Now**.
 - While the pointer is moving, auto-hide evaluates at most about 60 times a second. A timer also fires every 0.8 seconds: it reloads icons when the Dock plist or the native Dock's bottom inset changed, and otherwise re-checks the pointer in auto-hide mode.
 - The app does not register a Service Management login item. Login launch is a LaunchAgent plist, and it stores an absolute path.
-- v1.2.0 is ad-hoc signed. Gatekeeper does not treat the downloaded zip as notarized software.
-- Interface strings exist for English and Spanish only.
+- v1.3.0 is ad-hoc signed. Gatekeeper does not treat the downloaded zip as notarized software.
+- Interface strings are included for 8 languages (English, Spanish, French, German, Portuguese, Italian, Japanese, and Simplified Chinese). Other system locales fall back to English unless overridden in the **Language** submenu.
 
 ## FAQ
 
@@ -188,14 +190,14 @@ MultiScreenDock es una app de barra de menús, en Swift/AppKit, sin dependencias
 
 En pantallas apiladas, el borde inferior del monitor de arriba no es un tope físico. La barra espera un poco más en ese borde (90, 150 o 250 ms según la sensibilidad) para no abrirse cuando el cursor solo está de paso hacia el monitor de abajo.
 
-**Instalación.** Descarga [`MultiScreenDock-v1.2.0-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.2.0/MultiScreenDock-v1.2.0-macOS.zip), muévela a `/Applications` y, la primera vez:
+**Instalación.** Descarga [`MultiScreenDock-v1.3.0-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.3.0/MultiScreenDock-v1.3.0-macOS.zip), muévela a `/Applications` y, la primera vez:
 
 ```bash
 xattr -dr com.apple.quarantine /Applications/MultiScreenDock.app
 open /Applications/MultiScreenDock.app
 ```
 
-La versión 1.2.0 está firmada ad hoc, sin notarizar. Homebrew oficial todavía no sirve el cask; el archivo está en `packaging/homebrew/multiscreendock.rb`. Para compilar: `./build.sh` en macOS 13 o posterior, con las Command Line Tools.
+La versión 1.3.0 está firmada ad hoc, sin notarizar. Homebrew oficial todavía no sirve el cask; el archivo está en `packaging/homebrew/multiscreendock.rb`. Para compilar: `./build.sh` en macOS 13 o posterior, con las Command Line Tools.
 
 **Permisos.** No pide Accesibilidad ni Grabación de Pantalla. macOS pedirá permiso de Automatización al controlar el Finder (clic en el icono de Finder, ventana nueva, vaciar la Papelera) o System Events (ocultar automáticamente el Dock del sistema). Si rechazas System Events, esa opción reinicia el Dock con `killall Dock`.
 
@@ -203,7 +205,11 @@ La versión 1.2.0 está firmada ad hoc, sin notarizar. Homebrew oficial todavía
 
 **Desinstalar.** Sal de la app y borra `MultiScreenDock.app`. Si activaste **Abrir al iniciar sesión**, borra también `~/Library/LaunchAgents/io.github.fgomsan.multiscreendock.plist`. Los ajustes están en `~/Library/Preferences/io.github.fgomsan.MultiScreenDock.plist`.
 
-La barra solo existe en el borde inferior. No reproduce rebote, globos de notificación, pilas de carpetas ni el aumento en curva del Dock del sistema.
+La barra solo existe en el borde inferior. No reproduce rebote, globos de notificación, pilas de carpetas ni el aumento en curva del Dock del sistema. Incluye selector de idioma en vivo (8 idiomas) en el menú.
+
+## Support
+
+MultiScreenDock is free and open source. If it makes your multi-monitor workflow better, you can support its development on [Buy Me a Coffee](https://buymeacoffee.com/fgomsan).
 
 ## License
 

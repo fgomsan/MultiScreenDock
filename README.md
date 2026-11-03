@@ -9,22 +9,7 @@
 
 **El Dock de macOS solo aparece en una pantalla.** MultiScreenDock mantiene una copia en vivo en cada monitor, también en pantallas apiladas arriba, donde el Dock del sistema no puede salir. [Guía breve en español](#español).
 
-<!--
-TODO (owner): record a real demo and commit it as docs/demo.gif (GIF) or docs/demo.mp4.
-Do not commit a mockup, a generated frame, or someone else's screenshot.
-
-Suggested capture, about 10–20 seconds, on a Mac with two or more displays
-(a stacked pair makes the point):
-  1. The pointer reaches the bottom edge of a secondary or upper display and the bar slides up.
-  2. A click launches or activates an app without the bar stealing focus first.
-  3. A right-click on the bar opens settings.
-
-When the file exists, delete this comment and the blockquote below, and leave:
-
-![MultiScreenDock on stacked displays](docs/demo.gif)
--->
-
-> **Demo — not recorded yet.** The slot is [`docs/demo.gif`](docs/demo.gif). That file is intentionally absent until a real screen recording is committed. The image tag is commented out above so the README does not show a broken image before then.
+![MultiScreenDock mostrando el Dock en todos los monitores](docs/demo.gif)
 
 ## Features
 

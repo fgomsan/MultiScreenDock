@@ -1,6 +1,8 @@
 # MultiScreenDock
 
+[![Website](https://img.shields.io/badge/website-multiscreendock.fgomsan.here.now-2563eb)](https://multiscreendock.fgomsan.here.now/)
 [![Release](https://img.shields.io/github/v/release/fgomsan/MultiScreenDock)](https://github.com/fgomsan/MultiScreenDock/releases/latest)
+[![Apple Notarized](https://img.shields.io/badge/Apple-Notarized-34c759?logo=apple&logoColor=white)](https://github.com/fgomsan/MultiScreenDock/actions/workflows/notarize-release.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![macOS 13+](https://img.shields.io/badge/macOS-13%2B%20Universal-blue)](#requirements)
 [![Build](https://github.com/fgomsan/MultiScreenDock/actions/workflows/build.yml/badge.svg)](https://github.com/fgomsan/MultiScreenDock/actions/workflows/build.yml)

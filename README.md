@@ -32,37 +32,18 @@ Build from source also needs the Xcode Command Line Tools (`xcode-select --insta
 
 ## Install
 
-### Download a release
-
-1. Download [`MultiScreenDock-v1.3.1-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.3.1/MultiScreenDock-v1.3.1-macOS.zip) from the [latest release](https://github.com/fgomsan/MultiScreenDock/releases/latest).
-2. Unzip it and move `MultiScreenDock.app` to `/Applications`.
-3. The v1.3.1 app is ad-hoc signed (`codesign --sign -`) and has no Developer ID certificate and no notarization ticket yet. Gatekeeper blocks the quarantined download until you allow it once:
-
-   ```bash
-   xattr -dr com.apple.quarantine /Applications/MultiScreenDock.app
-   open /Applications/MultiScreenDock.app
-   ```
-
-   Right-click the app and choose **Open**, or allow it from **System Settings → Privacy & Security**, if you prefer not to use the terminal.
-
-### Homebrew
-
-There is no `brew install --cask multiscreendock` from `homebrew/homebrew-cask` yet. A cask for the v1.3.1 zip is in [`packaging/homebrew/multiscreendock.rb`](packaging/homebrew/multiscreendock.rb). It can be installed from a checkout, or from a personal tap once `fgomsan/homebrew-tap` exists:
-
-From a checkout of this repo:
-
-```bash
-brew install --cask --no-quarantine ./packaging/homebrew/multiscreendock.rb
-```
-
-After a personal tap repository `fgomsan/homebrew-tap` exists and contains this cask:
+### Homebrew (Recommended)
 
 ```bash
 brew tap fgomsan/tap
 brew install --cask multiscreendock
 ```
 
-`--no-quarantine` matters for this build: Homebrew quarantines cask downloads, and Gatekeeper rejects this ad-hoc signature. After a normal tap install, clear quarantine on the copy in `/Applications` or `~/Applications` with the `xattr` command above. A Developer ID signature and an Apple notarization ticket are what remove that step. See the release workflow notes in [`.github/workflows/notarize-release.yml`](.github/workflows/notarize-release.yml).
+### Download a release
+
+1. Download [`MultiScreenDock-v1.3.2-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.3.2/MultiScreenDock-v1.3.2-macOS.zip) from the [latest release](https://github.com/fgomsan/MultiScreenDock/releases/latest).
+2. Unzip it, move `MultiScreenDock.app` to `/Applications`, and open it.
+3. Official releases (`v1.3.2+`) are signed with an Apple **Developer ID Application** certificate (`G387RJ72S5`) and **notarized by Apple**, so macOS Gatekeeper opens them directly without warnings.
 
 ### Build from source
 
@@ -158,7 +139,6 @@ brew uninstall --cask --zap multiscreendock
 - The full-screen setting adds `fullScreenAuxiliary` at Dock window level. Some exclusive full-screen windows still cover the bar.
 - "Sync" follows the Dock plist and `NSWorkspace` notifications. It is not a private Dock API. A plist change is picked up on the next 0.8 second timer tick, or immediately (clearing cached icons) from **Sync Dock Icons Now**.
 - While the pointer is moving, auto-hide evaluates at most about 60 times a second. A timer also fires every 0.8 seconds: it reloads icons when the Dock plist or the native Dock's bottom inset changed, and otherwise re-checks the pointer in auto-hide mode.
-- v1.3.1 is ad-hoc signed. Gatekeeper does not treat the downloaded zip as notarized software until Apple Developer ID notarization is enabled.
 - Interface strings are included for 8 languages (English, Spanish, French, German, Portuguese, Italian, Japanese, and Simplified Chinese). Other system locales fall back to English unless overridden in the **Language** submenu.
 
 ## FAQ
@@ -169,8 +149,8 @@ It draws its own bar from the Dock's plist and from running apps. The system Doc
 **I only have one monitor. Why is there no bar?**
 That display is the primary display, and it is skipped by default. Turn **Skip primary display** off.
 
-**Why did macOS say the app is from an unidentified developer?**
-The release zip is signed ad hoc, with an empty certificate chain and no notarization ticket. Clear the quarantine flag or use **Open** once, as in [Install](#download-a-release). A future Developer ID build is what removes the warning.
+**Is it signed and notarized?**
+Yes. Starting with `v1.3.2`, official releases are built in GitHub Actions, signed with Developer ID (`G387RJ72S5`), notarized with Apple's notary service, and stapled. Local `./build.sh` builds remain ad-hoc signed for development.
 
 **Does it need Accessibility?**
 Not for this code. No Accessibility trust prompt is part of launch. Automation prompts appear only for the Finder and System Events actions in [Permissions](#permissions).
@@ -182,7 +162,7 @@ Pinned apps and folders are re-read when `com.apple.dock.plist` changes. The in-
 No. Geometry, hit testing, and the reveal strip are bottom-edge only.
 
 **Is the Homebrew cask live?**
-The cask file is in this repo. It is not in `homebrew/homebrew-cask`. That tap accepts a macOS app only when Gatekeeper accepts the download on a default install, which this ad-hoc signature does not pass. Install from the file in the repo, or from a personal tap named `fgomsan/homebrew-tap`, until a notarized build is published.
+Yes, via the official tap (`brew tap fgomsan/tap && brew install --cask multiscreendock`). The cask definition is also mirrored in [`packaging/homebrew/multiscreendock.rb`](packaging/homebrew/multiscreendock.rb).
 
 ## Español
 
@@ -190,14 +170,14 @@ MultiScreenDock es una app de barra de menús, en Swift/AppKit, sin dependencias
 
 En pantallas apiladas, el borde inferior del monitor de arriba no es un tope físico. La barra espera un poco más en ese borde (90, 150 o 250 ms según la sensibilidad) para no abrirse cuando el cursor solo está de paso hacia el monitor de abajo.
 
-**Instalación.** Descarga [`MultiScreenDock-v1.3.1-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.3.1/MultiScreenDock-v1.3.1-macOS.zip), muévela a `/Applications` y, la primera vez:
+**Instalación.** Con Homebrew:
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/MultiScreenDock.app
-open /Applications/MultiScreenDock.app
+brew tap fgomsan/tap
+brew install --cask multiscreendock
 ```
 
-La versión 1.3.1 está firmada ad hoc, sin notarizar aún. Homebrew oficial todavía no sirve el cask; el archivo está en `packaging/homebrew/multiscreendock.rb`. Para compilar y ejecutar los tests: `./Tests/run_tests.sh && ./build.sh` en macOS 13 o posterior, con las Command Line Tools.
+O descarga [`MultiScreenDock-v1.3.2-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.3.2/MultiScreenDock-v1.3.2-macOS.zip), descomprímela, mueve `MultiScreenDock.app` a `/Applications` y ábrela directamente (firmada con Apple Developer ID y notarizada por Apple, sin avisos de Gatekeeper). Para compilar desde código fuente y ejecutar los tests: `./Tests/run_tests.sh && ./build.sh` en macOS 13 o posterior.
 
 **Permisos.** No pide Accesibilidad ni Grabación de Pantalla. macOS pedirá permiso de Automatización al controlar el Finder (clic en el icono de Finder, ventana nueva, vaciar la Papelera) o System Events (ocultar automáticamente el Dock del sistema). Si rechazas System Events, ofrece abrir Ajustes del Sistema o confirmar explícitamente el reinicio del Dock.
 

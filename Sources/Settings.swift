@@ -70,7 +70,7 @@ final class DockSettings {
     static let bundleIdentifier = "io.github.fgomsan.MultiScreenDock"
     static let launchAgentLabel = "io.github.fgomsan.multiscreendock"
 
-    private let defaults = UserDefaults.standard
+    private let defaults: UserDefaults
 
     private enum Keys {
         static let visibilityMode = "visibilityMode"
@@ -89,7 +89,8 @@ final class DockSettings {
 
     var onChange: (() -> Void)?
 
-    private init() {
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
         let initialTileSize = Self.readNativeTileSize() ?? 36.0
         defaults.register(defaults: [
             Keys.visibilityMode: DockVisibilityMode.autoHide.rawValue,
@@ -105,10 +106,9 @@ final class DockSettings {
             Keys.disabledScreens: [String](),
             Keys.appLanguage: AppLanguage.system.rawValue
         ])
-        migrateLegacyLaunchAgentIfNeeded()
     }
 
-    private static func readNativeTileSize() -> Double? {
+    static func readNativeTileSize() -> Double? {
         guard let appleDock = UserDefaults(suiteName: "com.apple.dock") else { return nil }
         let val = appleDock.double(forKey: "tilesize")
         return (val >= 20 && val <= 80) ? val : nil
@@ -159,9 +159,13 @@ final class DockSettings {
     }
 
     var iconSize: CGFloat {
-        get { CGFloat(defaults.double(forKey: Keys.iconSize)) }
+        get {
+            let v = defaults.double(forKey: Keys.iconSize)
+            return (v >= 20 && v <= 80) ? CGFloat(v) : CGFloat(Self.readNativeTileSize() ?? 36.0)
+        }
         set {
-            defaults.set(Double(newValue), forKey: Keys.iconSize)
+            let clamped = min(max(Double(newValue), 20.0), 80.0)
+            defaults.set(clamped, forKey: Keys.iconSize)
             onChange?()
         }
     }
@@ -199,9 +203,14 @@ final class DockSettings {
     }
 
     var bottomMargin: CGFloat {
-        get { CGFloat(defaults.double(forKey: Keys.bottomMargin)) }
+        get {
+            guard defaults.object(forKey: Keys.bottomMargin) != nil else { return 6.0 }
+            let v = defaults.double(forKey: Keys.bottomMargin)
+            return (v >= 0 && v <= 40) ? CGFloat(v) : 6.0
+        }
         set {
-            defaults.set(Double(newValue), forKey: Keys.bottomMargin)
+            let clamped = min(max(Double(newValue), 0.0), 40.0)
+            defaults.set(clamped, forKey: Keys.bottomMargin)
             onChange?()
         }
     }
@@ -228,7 +237,7 @@ final class DockSettings {
         }
     }
 
-    private func displayID(for screen: NSScreen) -> CGDirectDisplayID? {
+    func displayID(for screen: NSScreen) -> CGDirectDisplayID? {
         guard let num = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
             return nil
         }
@@ -240,6 +249,13 @@ final class DockSettings {
             return "\(screen.localizedName)#\(id)"
         }
         return screen.localizedName
+    }
+
+    /// Disambiguates two identical monitors (which may share the same EDID UUID or vendor/model/0-serial)
+    /// across in-memory panel/timer dictionaries by suffixing the active CGDirectDisplayID.
+    static func composeRuntimeScreenKey(persistentKey: String, displayID: CGDirectDisplayID?) -> String {
+        guard let id = displayID else { return persistentKey }
+        return "\(persistentKey)#\(id)"
     }
 
     /// Persistent hardware identifier across macOS reboots using ColorSync/EDID display UUID.
@@ -260,6 +276,11 @@ final class DockSettings {
         return screen.localizedName
     }
 
+    /// Per-connection unique key used by runtime panel, hint, and auto-hide work item maps.
+    func runtimeScreenKey(for screen: NSScreen) -> String {
+        Self.composeRuntimeScreenKey(persistentKey: screenKey(for: screen), displayID: displayID(for: screen))
+    }
+
     func isPrimaryDisplay(_ screen: NSScreen) -> Bool {
         if let id = displayID(for: screen) {
             return id == CGMainDisplayID()
@@ -271,8 +292,11 @@ final class DockSettings {
         if skipPrimaryDisplay && isPrimaryDisplay(screen) {
             return false
         }
-        let persistentKey = screenKey(for: screen)
         let current = disabledScreens
+        if current.isEmpty {
+            return true
+        }
+        let persistentKey = screenKey(for: screen)
         if current.contains(persistentKey) {
             return false
         }
@@ -291,11 +315,12 @@ final class DockSettings {
         let persistentKey = screenKey(for: screen)
         let legacyKey = legacyScreenKey(for: screen)
         if isPrimaryDisplay(screen) && skipPrimaryDisplay {
-            skipPrimaryDisplay = false
+            defaults.set(false, forKey: Keys.skipPrimaryDisplay)
             var current = disabledScreens
             current.remove(persistentKey)
             current.remove(legacyKey)
-            disabledScreens = current
+            defaults.set(Array(current), forKey: Keys.disabledScreens)
+            onChange?()
             return
         }
         var current = disabledScreens
@@ -318,10 +343,10 @@ final class DockSettings {
 
     func setNativeDockAutohide(_ enabled: Bool) {
         let scriptSource = "tell application \"System Events\" to set autohide of dock preferences to \(enabled ? "true" : "false")"
+        var scriptErr: NSDictionary?
         if let script = NSAppleScript(source: scriptSource) {
-            var error: NSDictionary?
-            script.executeAndReturnError(&error)
-            if error == nil {
+            script.executeAndReturnError(&scriptErr)
+            if scriptErr == nil {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { [weak self] in
                     self?.onChange?()
                 }
@@ -329,12 +354,20 @@ final class DockSettings {
             }
         }
 
+        let errNum = scriptErr?[NSAppleScript.errorNumber] as? Int
+        let isPermDenied = (errNum == -1743)
+        let extraDetail = (!isPermDenied ? (scriptErr?[NSAppleScript.errorMessage] as? String) : nil)
+
         // Ask explicit user confirmation before restarting Apple's Dock process
         NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.alertStyle = .informational
-        alert.messageText = L10n.dockAutohidePermTitle
-        alert.informativeText = L10n.dockAutohidePermMessage
+        alert.messageText = isPermDenied ? L10n.dockAutohidePermTitle : L10n.dockAutohideScriptErrorTitle
+        if let detail = extraDetail, !detail.isEmpty {
+            alert.informativeText = "\(L10n.dockAutohidePermMessage)\n\n(\(detail))"
+        } else {
+            alert.informativeText = L10n.dockAutohidePermMessage
+        }
         alert.addButton(withTitle: L10n.dockAutohideRestartBtn)
         alert.addButton(withTitle: L10n.openAutomationSettingsBtn)
         alert.addButton(withTitle: L10n.cancelBtn)
@@ -344,8 +377,13 @@ final class DockSettings {
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: "/usr/bin/defaults")
             proc.arguments = ["write", "com.apple.dock", "autohide", "-bool", enabled ? "true" : "false"]
-            try? proc.run()
-            proc.waitUntilExit()
+            do {
+                try proc.run()
+                proc.waitUntilExit()
+                guard proc.terminationStatus == 0 else { return }
+            } catch {
+                return
+            }
 
             let killProc = Process()
             killProc.executableURL = URL(fileURLWithPath: "/usr/bin/killall")
@@ -368,7 +406,7 @@ final class DockSettings {
         return home.appendingPathComponent("Library/LaunchAgents/\(Self.launchAgentLabel).plist")
     }
 
-    private func migrateLegacyLaunchAgentIfNeeded() {
+    func migrateLegacyLaunchAgentIfNeeded() {
         let fm = FileManager.default
         guard fm.fileExists(atPath: legacyLaunchAgentURL.path) else { return }
         try? fm.removeItem(at: legacyLaunchAgentURL)
@@ -410,7 +448,6 @@ final class DockSettings {
                 alert.addButton(withTitle: L10n.okBtn)
                 alert.runModal()
             }
-            onChange?()
         }
     }
 }

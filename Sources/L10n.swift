@@ -3,8 +3,11 @@ import Foundation
 enum L10n {
     static let buyMeACoffeeURL = URL(string: "https://buymeacoffee.com/fgomsan")!
 
-    static var systemDetectedLanguage: AppLanguage {
-        for pref in Locale.preferredLanguages {
+    /// Used by unit tests to verify all translations without mutating UserDefaults or instantiating DockSettings.
+    static var overrideLanguageForTesting: AppLanguage?
+
+    static func detectLanguage(from preferredLanguages: [String]) -> AppLanguage {
+        for pref in preferredLanguages {
             let code = pref.lowercased()
             if code.hasPrefix("es") { return .es }
             if code.hasPrefix("fr") { return .fr }
@@ -12,13 +15,26 @@ enum L10n {
             if code.hasPrefix("pt") { return .pt }
             if code.hasPrefix("it") { return .it }
             if code.hasPrefix("ja") { return .ja }
-            if code.hasPrefix("zh") { return .zhHans }
+            if code == "zh" || code.hasPrefix("zh-hans") || code.hasPrefix("zh-cn") || code.hasPrefix("zh-sg") {
+                return .zhHans
+            }
+            if code.hasPrefix("zh") {
+                // Traditional Chinese (zh-Hant / zh-TW / zh-HK) falls back to next preferred language or English
+                continue
+            }
             if code.hasPrefix("en") { return .en }
         }
         return .en
     }
 
+    static var systemDetectedLanguage: AppLanguage {
+        detectLanguage(from: Locale.preferredLanguages)
+    }
+
     static var current: AppLanguage {
+        if let override = overrideLanguageForTesting {
+            return override == .system ? systemDetectedLanguage : override
+        }
         let selected = DockSettings.shared.appLanguage
         return selected == .system ? systemDetectedLanguage : selected
     }
@@ -59,14 +75,18 @@ enum L10n {
         )
     }
 
+    private static func plural(_ count: Int, one: String, other: String) -> String {
+        count == 1 ? one : other
+    }
+
     static func headerAutoHide(enabledCount: Int, total: Int) -> String {
         tr(
-            en: "MultiScreenDock — Auto-hide active on \(enabledCount) of \(total) displays",
-            es: "MultiScreenDock — Auto-ocultación activa en \(enabledCount) de \(total) pantallas",
-            fr: "MultiScreenDock — Masquage auto actif sur \(enabledCount) écran(s) sur \(total)",
-            de: "MultiScreenDock — Autom. Ausblenden aktiv auf \(enabledCount) von \(total) Displays",
-            pt: "MultiScreenDock — Ocultação automática ativa em \(enabledCount) de \(total) monitores",
-            it: "MultiScreenDock — Nascondi automaticamente attivo su \(enabledCount) di \(total) schermi",
+            en: "MultiScreenDock — Auto-hide active on \(enabledCount) of \(total) \(plural(total, one: "display", other: "displays"))",
+            es: "MultiScreenDock — Auto-ocultación activa en \(enabledCount) de \(total) \(plural(total, one: "pantalla", other: "pantallas"))",
+            fr: "MultiScreenDock — Masquage auto actif : \(enabledCount) sur \(total) \(plural(total, one: "écran", other: "écrans"))",
+            de: "MultiScreenDock — Autom. Ausblenden aktiv auf \(enabledCount) von \(total) \(plural(total, one: "Display", other: "Displays"))",
+            pt: "MultiScreenDock — Ocultação automática ativa em \(enabledCount) de \(total) \(plural(total, one: "monitor", other: "monitores"))",
+            it: "MultiScreenDock — Nascondi automaticamente attivo su \(enabledCount) di \(total) \(plural(total, one: "schermo", other: "schermi"))",
             ja: "MultiScreenDock — 自動非表示：\(total)台中\(enabledCount)台のディスプレイで有効",
             zh: "MultiScreenDock — 自动隐藏已在 \(enabledCount)/\(total) 台显示器上启用"
         )
@@ -74,12 +94,12 @@ enum L10n {
 
     static func headerAllPanels(visible: Int, total: Int) -> String {
         tr(
-            en: "MultiScreenDock — Fixed on \(visible) of \(total) displays",
-            es: "MultiScreenDock — Fijo en \(visible) de \(total) pantallas",
-            fr: "MultiScreenDock — Fixe sur \(visible) écran(s) sur \(total)",
-            de: "MultiScreenDock — Sichtbar fixiert auf \(visible) von \(total) Displays",
-            pt: "MultiScreenDock — Fixo em \(visible) de \(total) monitores",
-            it: "MultiScreenDock — Fisso su \(visible) di \(total) schermi",
+            en: "MultiScreenDock — Fixed on \(visible) of \(total) \(plural(total, one: "display", other: "displays"))",
+            es: "MultiScreenDock — Fijo en \(visible) de \(total) \(plural(total, one: "pantalla", other: "pantallas"))",
+            fr: "MultiScreenDock — Fixe : \(visible) sur \(total) \(plural(total, one: "écran", other: "écrans"))",
+            de: "MultiScreenDock — Sichtbar fixiert auf \(visible) von \(total) \(plural(total, one: "Display", other: "Displays"))",
+            pt: "MultiScreenDock — Fixo em \(visible) de \(total) \(plural(total, one: "monitor", other: "monitores"))",
+            it: "MultiScreenDock — Fisso su \(visible) di \(total) \(plural(total, one: "schermo", other: "schermi"))",
             ja: "MultiScreenDock — 常時表示：\(total)台中\(visible)台のディスプレイ",
             zh: "MultiScreenDock — 已固定显示在 \(visible)/\(total) 台显示器上"
         )
@@ -87,12 +107,12 @@ enum L10n {
 
     static func headerHybrid(visible: Int, total: Int) -> String {
         tr(
-            en: "MultiScreenDock — \(visible) panels + native Dock (\(total) displays)",
-            es: "MultiScreenDock — \(visible) paneles + Dock nativo (\(total) pantallas)",
-            fr: "MultiScreenDock — \(visible) panneaux + Dock natif (\(total) écrans)",
-            de: "MultiScreenDock — \(visible) Leisten + System-Dock (\(total) Displays)",
-            pt: "MultiScreenDock — \(visible) painéis + Dock nativo (\(total) monitores)",
-            it: "MultiScreenDock — \(visible) barre + Dock di sistema (\(total) schermi)",
+            en: "MultiScreenDock — \(visible) \(plural(visible, one: "panel", other: "panels")) + native Dock (\(total) \(plural(total, one: "display", other: "displays")))",
+            es: "MultiScreenDock — \(visible) \(plural(visible, one: "panel", other: "paneles")) + Dock nativo (\(total) \(plural(total, one: "pantalla", other: "pantallas")))",
+            fr: "MultiScreenDock — \(visible) \(plural(visible, one: "panneau", other: "panneaux")) + Dock natif (\(total) \(plural(total, one: "écran", other: "écrans")))",
+            de: "MultiScreenDock — \(visible) \(plural(visible, one: "Leiste", other: "Leisten")) + System-Dock (\(total) \(plural(total, one: "Display", other: "Displays")))",
+            pt: "MultiScreenDock — \(visible) \(plural(visible, one: "painel", other: "painéis")) + Dock nativo (\(total) \(plural(total, one: "monitor", other: "monitores")))",
+            it: "MultiScreenDock — \(visible) \(plural(visible, one: "barra", other: "barre")) + Dock di sistema (\(total) \(plural(total, one: "schermo", other: "schermi")))",
             ja: "MultiScreenDock — \(visible)パネル + 標準Dock（計\(total)台）",
             zh: "MultiScreenDock — \(visible) 个面板 + 原生程序坞（共 \(total) 台显示器）"
         )
@@ -114,7 +134,7 @@ enum L10n {
     static var modeAlwaysVisible: String {
         tr(
             en: "Keep Dock always fixed & visible",
-            es: "Mantener el Dock siempre fijo visible",
+            es: "Mantener el Dock siempre fijo y visible",
             fr: "Garder le Dock toujours fixe et visible",
             de: "Dock immer sichtbar fixieren",
             pt: "Manter o Dock sempre fixo e visível",
@@ -345,6 +365,19 @@ enum L10n {
         )
     }
 
+    static func sizeSystemDock(_ pts: Int) -> String {
+        tr(
+            en: "System Dock (\(pts) pt)",
+            es: "Dock del sistema (\(pts) pt)",
+            fr: "Dock système (\(pts) pt)",
+            de: "System-Dock (\(pts) pt)",
+            pt: "Dock do sistema (\(pts) pt)",
+            it: "Dock di sistema (\(pts) pt)",
+            ja: "標準Dock（\(pts) pt）",
+            zh: "系统程序坞（\(pts) pt）"
+        )
+    }
+
     static func activeScreensMenu(_ count: Int) -> String {
         tr(
             en: "Active Displays (\(count))",
@@ -476,6 +509,32 @@ enum L10n {
     }
 
     // MARK: - Items & Context Menu
+    static var finderLabel: String {
+        tr(
+            en: "Finder",
+            es: "Finder",
+            fr: "Finder",
+            de: "Finder",
+            pt: "Finder",
+            it: "Finder",
+            ja: "Finder",
+            zh: "访达"
+        )
+    }
+
+    static var runningAccessibilityState: String {
+        tr(
+            en: "Running",
+            es: "En ejecución",
+            fr: "Ouverte",
+            de: "Aktiv",
+            pt: "Em execução",
+            it: "In esecuzione",
+            ja: "起動中",
+            zh: "正在运行"
+        )
+    }
+
     static var trashLabel: String {
         tr(
             en: "Trash",
@@ -547,7 +606,7 @@ enum L10n {
             es: "Mostrar contenedor en el Finder",
             fr: "Afficher le dossier parent",
             de: "Übergeordneten Ordner zeigen",
-            pt: "Mostrar Pasta Contida",
+            pt: "Mostrar na Pasta",
             it: "Mostra cartella superiore",
             ja: "内包しているフォルダを表示",
             zh: "显示所在文件夹"
@@ -601,7 +660,7 @@ enum L10n {
             de: "Ausblenden",
             pt: "Ocultar",
             it: "Nascondi",
-            ja: "非表示",
+            ja: "隠す",
             zh: "隐藏"
         )
     }
@@ -645,6 +704,45 @@ enum L10n {
         )
     }
 
+    static var emptyTrashConfirmTitle: String {
+        tr(
+            en: "Are you sure you want to permanently erase the items in the Trash?",
+            es: "¿Seguro que quieres borrar definitivamente los ítems de la Papelera?",
+            fr: "Voulez-vous vraiment effacer définitivement les éléments de la corbeille ?",
+            de: "Möchtest du die Objekte im Papierkorb wirklich endgültig löschen?",
+            pt: "Tem certeza de que deseja apagar permanentemente os itens no Lixo?",
+            it: "Vuoi davvero eliminare definitivamente gli elementi nel Cestino?",
+            ja: "ゴミ箱内の項目を完全に消去してもよろしいですか？",
+            zh: "确定要永久抹掉废纸篓中的项目吗？"
+        )
+    }
+
+    static var emptyTrashConfirmMessage: String {
+        tr(
+            en: "You can't undo this action.",
+            es: "Esta acción no se puede deshacer.",
+            fr: "Cette action est irréversible.",
+            de: "Diese Aktion kann nicht widerrufen werden.",
+            pt: "Você não pode desfazer esta ação.",
+            it: "Non puoi annullare questa azione.",
+            ja: "この操作は取り消せません。",
+            zh: "此操作不能撤销。"
+        )
+    }
+
+    static var emptyTrashConfirmBtn: String {
+        tr(
+            en: "Empty Trash",
+            es: "Vaciar Papelera",
+            fr: "Vider la corbeille",
+            de: "Papierkorb entleeren",
+            pt: "Esvaziar Lixo",
+            it: "Vuota il Cestino",
+            ja: "ゴミ箱を空にする",
+            zh: "清倒废纸篓"
+        )
+    }
+
     // MARK: - Alerts & Error Feedback
     static var dragMoveErrorTitle: String {
         tr(
@@ -656,6 +754,19 @@ enum L10n {
             it: "Impossibile spostare tutti gli elementi",
             ja: "一部の項目を移動できませんでした",
             zh: "无法移动部分项目"
+        )
+    }
+
+    static var dragCopyErrorTitle: String {
+        tr(
+            en: "Could Not Copy All Items",
+            es: "No se pudieron copiar todos los archivos",
+            fr: "Impossible de copier tous les éléments",
+            de: "Nicht alle Objekte konnten kopiert werden",
+            pt: "Não foi possível copiar todos os itens",
+            it: "Impossibile copiare tutti gli elementi",
+            ja: "一部の項目をコピーできませんでした",
+            zh: "无法拷贝部分项目"
         )
     }
 
@@ -695,6 +806,19 @@ enum L10n {
             it: "Autorizzazione Automazione negata",
             ja: "オートメーションの許可がありません",
             zh: "自动化权限被拒绝"
+        )
+    }
+
+    static var dockAutohideScriptErrorTitle: String {
+        tr(
+            en: "Could Not Toggle Apple's Dock",
+            es: "No se pudo cambiar el Dock de Apple",
+            fr: "Impossible de modifier le Dock d’Apple",
+            de: "Apples System-Dock konnte nicht umgeschaltet werden",
+            pt: "Não foi possível alternar o Dock da Apple",
+            it: "Impossibile modificare il Dock di Apple",
+            ja: "Apple標準のDockを切り替えられませんでした",
+            zh: "无法切换 Apple 原生程序坞"
         )
     }
 

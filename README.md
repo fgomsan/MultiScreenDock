@@ -19,8 +19,8 @@
 - **Two visibility modes.** Auto-hide, revealed by dwelling at the bottom edge, or always visible. On a display with another monitor directly underneath, the dwell is longer (90 / 150 / 250 ms instead of 40 / 80 / 160 ms) so a fast vertical crossing does not pop the bar. An optional pill marks the bottom center while the bar is hidden.
 - **The same items as your Dock.** Finder, pinned apps, running apps that are not pinned (with a dot, brighter for the frontmost app), pinned files and folders, and the Trash. Spacers in `com.apple.dock.plist` are skipped. Icons refresh from that plist, from `NSWorkspace` launch/quit/activate notifications, and from **Sync Dock Icons Now**.
 - **Stays out of the system Dock's way.** The primary display is skipped by default. On any display where the system Dock is currently taking bottom space, the extra bar hides while **Avoid overlapping where native Dock is visible** is on.
-- **Settings where your hand already is.** Right-click the bar, Control-click it, or open **MultiScreenDock Settings** at the bottom of an icon's menu. The same menu is on the menu-bar icon (`dock.rectangle`, or the title "Dock+" if that symbol is missing). Per-display toggles, icon size (28 / 36 / 44 / 52 pt, scaled down to fit a narrow screen, floor 20 pt), hover magnification, and launch at login live there.
-- **Clicks that match the Dock closely enough to use.** Click launches or activates. Command-click reveals an app, file, or folder in Finder. Option-click hides an app when that app is already frontmost. Right-click can open, show in Finder, hide, quit, open a Finder window, or empty the Trash. Drop files on an app to open them with it, on a folder to move them into it, or on the Trash to trash them.
+- **Settings where your hand already is.** Right-click the bar, Control-click it, or open **MultiScreenDock Settings** at the bottom of an icon's menu. The same menu is on the menu-bar icon (`dock.rectangle`, or the title "Dock+" if that symbol is missing). Per-display toggles, icon size (28 / 36 / 44 / 52 pt, scaled down to fit a narrow screen, floor 20 pt or 14 pt in extreme overflow), hover magnification, and launch at login live there.
+- **Clicks that match the Dock closely enough to use.** Click launches or activates. Command-click reveals an app, file, or folder in Finder. Option-click hides an app when that app is already frontmost. Right-click can open, show in Finder, hide, quit, open a Finder window, or empty the Trash (with confirmation). Drop files on an app to open them with it, on a folder to move them into it (or copy on Option-drag / across volumes), or on the Trash to trash them.
 - **A panel that does not take focus.** The bar is a non-activating `NSPanel`. Hovering it leaves the current app active. The label under the pointer is the item name. Hover magnification scales that one icon to 1.18×.
 - **8 languages built in** (English, Español, Français, Deutsch, Português, Italiano, 日本語, and 简体中文), detected automatically from macOS or switched manually at any time from the **Language** submenu.
 
@@ -43,7 +43,7 @@ brew install --cask multiscreendock
 
 ### Download a release
 
-1. Download [`MultiScreenDock-v1.3.2-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.3.2/MultiScreenDock-v1.3.2-macOS.zip) from the [latest release](https://github.com/fgomsan/MultiScreenDock/releases/latest).
+1. Download [`MultiScreenDock-v1.3.3-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.3.3/MultiScreenDock-v1.3.3-macOS.zip) from the [latest release](https://github.com/fgomsan/MultiScreenDock/releases/latest).
 2. Unzip it, move `MultiScreenDock.app` to `/Applications`, and open it.
 3. Official releases (`v1.3.2+`) are signed with an Apple **Developer ID Application** certificate (`G387RJ72S5`) and **notarized by Apple**, so macOS Gatekeeper opens them directly without warnings.
 
@@ -111,17 +111,15 @@ macOS asks for **Automation** permission only when a feature sends Apple events:
 
 ## Uninstall
 
-Quit from the menu (**Quit MultiScreenDock**), then delete the app.
+Turn off **Launch at Login** from the menu (if enabled), quit from **Quit MultiScreenDock**, then delete the app.
 
 ```bash
 osascript -e 'tell application id "io.github.fgomsan.MultiScreenDock" to quit' || true
 rm -rf /Applications/MultiScreenDock.app
-launchctl bootout "gui/$(id -u)/io.github.fgomsan.multiscreendock" 2>/dev/null || true
-rm -f ~/Library/LaunchAgents/io.github.fgomsan.multiscreendock.plist
 rm -f ~/Library/Preferences/io.github.fgomsan.MultiScreenDock.plist
 ```
 
-The LaunchAgent file exists only if **Launch at Login** was turned on. The preferences file holds the menu settings (mode, sizes, disabled displays).
+**Launch at Login** uses `SMAppService.mainApp`, so macOS automatically cleans up or lets you toggle the entry in **System Settings → General → Login Items**. The preferences file holds the menu settings (mode, sizes, disabled displays).
 
 From Homebrew, once the cask is installed:
 
@@ -130,14 +128,14 @@ brew uninstall --cask multiscreendock
 brew uninstall --cask --zap multiscreendock
 ```
 
-`uninstall` quits the app, boots out the LaunchAgent label, and deletes that plist. `--zap` also deletes the preferences plist.
+`uninstall` quits the app and removes its Login Item registration. `--zap` also deletes the preferences plist.
 
 ## Limitations
 
 - The bar is always centered on the **bottom** edge. A system Dock pinned to the left or right edge is not mirrored, and overlap detection only looks at the bottom `visibleFrame` inset.
-- This is a separate panel, not Apple's Dock process. There is no bounce, no notification badge, no download progress, no folder stack or fan (a folder opens in Finder), and no Dock spacers. Hover magnification scales the single icon under the pointer; it is not the system Dock's magnification curve.
-- Dropping files on a folder **moves** them (`FileManager.moveItem`). If a destination name collision or permission error occurs, the file stays in place and an alert reports which items could not be moved.
-- **Upper** / **Lower** in the displays menu is a label for screens whose `minY` is at least 600 points. The stacked-display dwell uses actual frame geometry, not that label.
+- This is a separate panel, not Apple's Dock process. There is no bounce, no notification badge, no download progress, no folder stack or fan (a folder opens in Finder), no web URL tiles (`url-tile`), and no Dock spacers. Hover magnification scales the single icon under the pointer; it is not the system Dock's magnification curve.
+- Dropping files on a folder **moves** them on the same volume (`FileManager.moveItem`) and **copies** them when Option-dragging or dropping across volumes (`FileManager.copyItem`). If a destination name collision or permission error occurs, the source file stays intact and an alert reports which items failed.
+- **Upper** / **Lower** in the displays menu and the stacked-display dwell both derive from actual vertical display adjacency (`hasMonitorDirectlyBelow` / `hasMonitorDirectlyAbove`).
 - The full-screen setting adds `fullScreenAuxiliary` at Dock window level. Some exclusive full-screen windows still cover the bar.
 - "Sync" follows the Dock plist and `NSWorkspace` notifications. It is not a private Dock API. A plist change is picked up on the next 0.8 second timer tick, or immediately (clearing cached icons) from **Sync Dock Icons Now**.
 - While the pointer is moving, auto-hide evaluates at most about 60 times a second. A timer also fires every 0.8 seconds: it reloads icons when the Dock plist or the native Dock's bottom inset changed, and otherwise re-checks the pointer in auto-hide mode.
@@ -149,7 +147,7 @@ brew uninstall --cask --zap multiscreendock
 It draws its own bar from the Dock's plist and from running apps. The system Dock keeps running. The primary display is left to the system Dock unless you turn **Skip primary display** off.
 
 **I only have one monitor. Why is there no bar?**
-That display is the primary display, and it is skipped by default. Turn **Skip primary display** off.
+That display is the primary display, and it is skipped by default. Turn **Skip primary display** off (and if Apple's native Dock is visible at the bottom, either auto-hide the native Dock or turn **Avoid overlapping where native Dock is visible** off).
 
 **Is it signed and notarized?**
 Yes. Starting with `v1.3.2`, official releases are built in GitHub Actions, signed with Developer ID (`G387RJ72S5`), notarized with Apple's notary service, and stapled. Local `./build.sh` builds remain ad-hoc signed for development.
@@ -179,13 +177,13 @@ brew tap fgomsan/tap
 brew install --cask multiscreendock
 ```
 
-O descarga [`MultiScreenDock-v1.3.2-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.3.2/MultiScreenDock-v1.3.2-macOS.zip), descomprímela, mueve `MultiScreenDock.app` a `/Applications` y ábrela directamente (firmada con Apple Developer ID y notarizada por Apple, sin avisos de Gatekeeper). Para compilar desde código fuente y ejecutar los tests: `./Tests/run_tests.sh && ./build.sh` en macOS 13 o posterior.
+O descarga [`MultiScreenDock-v1.3.3-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.3.3/MultiScreenDock-v1.3.3-macOS.zip), descomprímela, mueve `MultiScreenDock.app` a `/Applications` y ábrela directamente (firmada con Apple Developer ID y notarizada por Apple, sin avisos de Gatekeeper). Para compilar desde código fuente y ejecutar los tests: `./Tests/run_tests.sh && ./build.sh` en macOS 13 o posterior.
 
 **Permisos.** No pide Accesibilidad ni Grabación de Pantalla. macOS pedirá permiso de Automatización al controlar el Finder (clic en el icono de Finder, ventana nueva, vaciar la Papelera) o System Events (ocultar automáticamente el Dock del sistema). Si rechazas System Events, ofrece abrir Ajustes del Sistema o confirmar explícitamente el reinicio del Dock.
 
-**Uso.** Clic derecho sobre la barra, o el icono `dock.rectangle` en la barra de menús. Clic abre o activa. ⌘-clic muestra el ítem en el Finder (salvo Finder y la Papelera). ⌥-clic oculta la app si ya está delante. Arrastrar archivos a una carpeta los mueve dentro.
+**Uso.** Clic derecho sobre la barra, o el icono `dock.rectangle` en la barra de menús. Clic abre o activa. ⌘-clic muestra el ítem en el Finder (salvo Finder y la Papelera). ⌥-clic oculta la app si ya está delante. Arrastrar archivos a una carpeta los mueve dentro (o los copia con ⌥-arrastrar o entre volúmenes distintos).
 
-**Desinstalar.** Sal de la app y borra `MultiScreenDock.app`. Si activaste **Abrir al iniciar sesión**, borra también `~/Library/LaunchAgents/io.github.fgomsan.multiscreendock.plist`. Los ajustes están en `~/Library/Preferences/io.github.fgomsan.MultiScreenDock.plist`.
+**Desinstalar.** Desactiva **Abrir automáticamente al iniciar sesión** en el menú (si estaba activo), sal de la app y borra `MultiScreenDock.app`. Los ajustes están en `~/Library/Preferences/io.github.fgomsan.MultiScreenDock.plist`.
 
 La barra solo existe en el borde inferior. No reproduce rebote, globos de notificación, pilas de carpetas ni el aumento en curva del Dock del sistema. Incluye selector de idioma en vivo (8 idiomas) en el menú.
 

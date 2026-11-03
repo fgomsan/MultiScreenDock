@@ -139,9 +139,9 @@ cat > "${CONTENTS_DIR}/Info.plist" << 'EOF'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.3.2</string>
+    <string>1.3.3</string>
     <key>CFBundleVersion</key>
-    <string>6</string>
+    <string>7</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>
@@ -172,7 +172,8 @@ swiftc -O -target x86_64-apple-macos13.0 -Xlinker -w "${FRAMEWORKS[@]}" "${SOURC
 lipo -create -output "${MACOS_DIR}/${APP_NAME}" "${BUILD_TMP}/${APP_NAME}-arm64" "${BUILD_TMP}/${APP_NAME}-x86_64"
 
 xattr -cr "${APP_BUNDLE}"
-codesign --force --deep --sign - "${APP_BUNDLE}"
+CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
+codesign --force --deep --sign "${CODESIGN_IDENTITY}" "${APP_BUNDLE}"
 
 rm -rf "${FINAL_APP_BUNDLE}"
 ditto "${APP_BUNDLE}" "${FINAL_APP_BUNDLE}"

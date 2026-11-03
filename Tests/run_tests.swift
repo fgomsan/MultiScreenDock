@@ -103,7 +103,6 @@ func testTriggerZoneStrictlyInsideKeepAliveZone() {
                     expect(keepAlive.contains(trigger),
                            "keepAlive \(keepAlive) must strictly contain trigger \(trigger) on frame \(frame)")
 
-                    // Sample boundary points along left/right edges of triggerZone
                     let leftEdgePt = NSPoint(x: trigger.minX + 0.1, y: trigger.minY + trigger.height - 0.1)
                     let rightEdgePt = NSPoint(x: trigger.maxX - 0.1, y: trigger.minY + 0.5)
                     expect(keepAlive.contains(leftEdgePt), "Left wing of trigger must stay inside keepAlive")
@@ -114,7 +113,7 @@ func testTriggerZoneStrictlyInsideKeepAliveZone() {
     }
 }
 
-// 3. Regression test: Multiple versions of the same app (URL-first matching vs Cryptex Safari fallback)
+// 3. Regression test: Multiple versions of the same app, Cryptex Safari, and Gatekeeper AppTranslocation (B5)
 func testAppInstanceMatcherURLPriority() {
     let xcodeStable = URL(fileURLWithPath: "/Applications/Xcode.app")
     let xcodeBeta = URL(fileURLWithPath: "/Applications/Xcode-beta.app")
@@ -144,20 +143,165 @@ func testAppInstanceMatcherURLPriority() {
     ]
     expect(AppInstanceMatcher.preferredIndex(targetBundleID: "com.apple.Safari", targetURL: safariPinned, candidates: safariCandidates) == 0,
            "Safari pinned at /Applications/Safari.app must still match Cryptex-mounted Safari.app")
+
+    // Case D: App pinned from ~/Downloads running under Gatekeeper AppTranslocation
+    let pinnedDownloaded = URL(fileURLWithPath: "/Users/alice/Downloads/MyTool.app")
+    let translocated = URL(fileURLWithPath: "/private/var/folders/zz/abc123/T/AppTranslocation/9F1E-44AA/d/MyTool.app")
+    let translocatedCandidates: [(bundleID: String?, bundleURL: URL?)] = [
+        ("com.example.mytool", translocated)
+    ]
+    expect(AppInstanceMatcher.preferredIndex(targetBundleID: "com.example.mytool", targetURL: pinnedDownloaded, candidates: translocatedCandidates) == 0,
+           "Translocated app with matching bundleID and bundle name must match its pinned tile")
 }
 
-// 4. Localization completeness across all 8 supported languages
-func testLocalizationAllLanguagesNonEmpty() {
-    let original = DockSettings.shared.appLanguage
-    defer { DockSettings.shared.appLanguage = original }
+// 4. Regression test (M1): Dock file-data URL parsing for _CFURLStringType = 0 (POSIX) and 15 (file://)
+func testDockFileDataURLParsing() {
+    let type0Simple: [String: Any] = [
+        "_CFURLString": "/Applications/Safari.app",
+        "_CFURLStringType": 0
+    ]
+    let u0 = DockModelReader.parseDockFileURL(from: type0Simple)
+    expect(u0?.isFileURL == true && u0?.path == "/Applications/Safari.app",
+           "Type 0 POSIX path must produce a valid file:// URL (got \(String(describing: u0)))")
+
+    let type0WithSpaces: [String: Any] = [
+        "_CFURLString": "/Applications/Visual Studio Code.app",
+        "_CFURLStringType": 0
+    ]
+    let uSpaces = DockModelReader.parseDockFileURL(from: type0WithSpaces)
+    expect(uSpaces?.isFileURL == true && uSpaces?.path == "/Applications/Visual Studio Code.app",
+           "Type 0 POSIX path with spaces must produce a valid file:// URL (got \(String(describing: uSpaces)))")
+
+    let type15URL: [String: Any] = [
+        "_CFURLString": "file:///Applications/Visual%20Studio%20Code.app/",
+        "_CFURLStringType": 15
+    ]
+    let u15 = DockModelReader.parseDockFileURL(from: type15URL)
+    expect(u15?.isFileURL == true && u15?.path == "/Applications/Visual Studio Code.app",
+           "Type 15 file:// URL must decode percent-encoding cleanly")
+
+    let webTile: [String: Any] = [
+        "_CFURLString": "https://multiscreendock.fgomsan.here.now/",
+        "_CFURLStringType": 15
+    ]
+    expect(DockModelReader.parseDockFileURL(from: webTile) == nil,
+           "Non-file URLs must not masquerade as local file tiles")
+}
+
+// 5. Regression test (M2): Identical monitors sharing EDID UUID must disambiguate runtime keys by CGDirectDisplayID
+func testIdenticalMonitorsRuntimeKeyDisambiguation() {
+    let sharedUUID = "uuid:00000000-0000-0000-0000-000000000000"
+    let keyA = DockSettings.composeRuntimeScreenKey(persistentKey: sharedUUID, displayID: 3)
+    let keyB = DockSettings.composeRuntimeScreenKey(persistentKey: sharedUUID, displayID: 7)
+    expect(keyA != keyB, "Two identical displays with the same EDID UUID must receive distinct runtime keys (\(keyA) vs \(keyB))")
+    expect(keyA == "\(sharedUUID)#3" && keyB == "\(sharedUUID)#7", "Runtime key format must suffix #displayID")
+}
+
+// 6. Regression test (M4): Structural signature ignores running/frontmost dot state and Trash empty/full state
+func testStructuralSignatureInPlaceStateChanges() {
+    let dummy = NSImage(size: NSSize(width: 32, height: 32))
+    let base: [DockItem] = [
+        DockItem(id: "finder", label: "Finder", kind: .finder, icon: dummy, isRunning: true, isFrontmost: true),
+        DockItem(id: "pinned-safari-0", label: "Safari", kind: .application(bundleID: "com.apple.Safari", url: URL(fileURLWithPath: "/Applications/Safari.app")), icon: dummy, isRunning: true, isFrontmost: false),
+        DockItem(id: "sep-others", label: "", kind: .separator, icon: dummy, isRunning: false, isFrontmost: false),
+        DockItem(id: "trash", label: "Trash", kind: .trash(isFull: false), icon: dummy, isRunning: false, isFrontmost: false)
+    ]
+    let activatedSafariAndFilledTrash: [DockItem] = [
+        DockItem(id: "finder", label: "Finder", kind: .finder, icon: dummy, isRunning: true, isFrontmost: false),
+        DockItem(id: "pinned-safari-0", label: "Safari", kind: .application(bundleID: "com.apple.Safari", url: URL(fileURLWithPath: "/Applications/Safari.app")), icon: dummy, isRunning: true, isFrontmost: true),
+        DockItem(id: "sep-others", label: "", kind: .separator, icon: dummy, isRunning: false, isFrontmost: false),
+        DockItem(id: "trash", label: "Trash", kind: .trash(isFull: true), icon: dummy, isRunning: false, isFrontmost: false)
+    ]
+    expect(DockLayoutMath.structuralSignature(for: base) == DockLayoutMath.structuralSignature(for: activatedSafariAndFilledTrash),
+           "Focus switch and Trash icon swap must NOT trigger full DockTileView teardown")
+
+    var addedApp = activatedSafariAndFilledTrash
+    addedApp.insert(
+        DockItem(id: "running-999", label: "Terminal", kind: .application(bundleID: "com.apple.Terminal", url: URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")), icon: dummy, isRunning: true, isFrontmost: false),
+        at: 2
+    )
+    expect(DockLayoutMath.structuralSignature(for: base) != DockLayoutMath.structuralSignature(for: addedApp),
+           "Adding a new tile MUST change structuralSignature to trigger layout rebuild")
+}
+
+// 7. Regression test (B12): Stacked display detection works with negative minY when upper monitor is primary (0,0)
+func testStackedDisplayGeometryDetection() {
+    let upperPrimary = NSRect(x: 0, y: 0, width: 2560, height: 1440)
+    let lowerNegative = NSRect(x: 0, y: -1440, width: 2560, height: 1440)
+    let sideOffset = NSRect(x: 2560, y: 700, width: 1920, height: 1080)
+    let all = [upperPrimary, lowerNegative, sideOffset]
+
+    expect(DockLayoutMath.hasMonitorDirectlyBelow(targetFrame: upperPrimary, among: all),
+           "Upper primary monitor at (0,0) must detect lower monitor at y=-1440")
+    expect(DockLayoutMath.hasMonitorDirectlyAbove(targetFrame: lowerNegative, among: all),
+           "Lower monitor at y=-1440 must detect upper primary monitor above it")
+    expect(!DockLayoutMath.hasMonitorDirectlyBelow(targetFrame: sideOffset, among: all) &&
+           !DockLayoutMath.hasMonitorDirectlyAbove(targetFrame: sideOffset, among: all),
+           "Side-by-side monitor offset vertically by 700pt without X overlap must NOT be labeled Upper/Lower")
+}
+
+// 8. Regression test (B18, B25): Settings bounds clamping in an isolated UserDefaults suite (leaves zero files behind)
+func testSettingsBoundsValidationInIsolatedSuite() {
+    let suiteName = "io.github.fgomsan.MultiScreenDock.tests.\(UUID().uuidString)"
+    guard let suite = UserDefaults(suiteName: suiteName) else {
+        expect(false, "Could not create isolated UserDefaults suite")
+        return
+    }
+    defer { suite.removePersistentDomain(forName: suiteName) }
+
+    let settings = DockSettings(defaults: suite)
+
+    suite.set("corrupt", forKey: "iconSize")
+    expect((20...80).contains(settings.iconSize), "Corrupt iconSize string must fall back within 20...80 (got \(settings.iconSize))")
+
+    suite.set(0.0, forKey: "iconSize")
+    expect((20...80).contains(settings.iconSize), "Zero iconSize must fall back within 20...80")
+
+    settings.iconSize = 500
+    expect(settings.iconSize == 80, "iconSize setter must clamp upper bound to 80")
+
+    suite.set(-15.0, forKey: "bottomMargin")
+    expect(settings.bottomMargin == 6.0, "Negative bottomMargin must fall back to 6.0")
+
+    settings.bottomMargin = 120
+    expect(settings.bottomMargin == 40.0, "bottomMargin setter must clamp to 40.0")
+}
+
+// 9. Regression test (B19-B26): Side-effect-free localization & language detection checks
+func testLocalizationAndLanguageDetectionSideEffectFree() {
+    defer { L10n.overrideLanguageForTesting = nil }
+
+    expect(L10n.detectLanguage(from: ["zh-Hans-CN", "en-US"]) == .zhHans, "zh-Hans-CN must map to .zhHans")
+    expect(L10n.detectLanguage(from: ["zh-SG"]) == .zhHans, "zh-SG must map to .zhHans")
+    expect(L10n.detectLanguage(from: ["zh-Hant-TW", "en-US"]) == .en, "Traditional Chinese zh-Hant-TW must fall back to English")
+    expect(L10n.detectLanguage(from: ["zh-Hant-HK", "es-ES"]) == .es, "zh-Hant-HK followed by es-ES must pick Spanish")
+
+    L10n.overrideLanguageForTesting = .pt
+    expect(L10n.showContainerInFinder == "Mostrar na Pasta", "Portuguese enclosing folder mistranslation regression")
+
+    L10n.overrideLanguageForTesting = .ja
+    expect(L10n.hideSingle == "隠す", "Japanese Hide verb must match macOS Dock standard 隠す")
+
+    L10n.overrideLanguageForTesting = .zhHans
+    expect(L10n.finderLabel == "访达", "Simplified Chinese Finder label must be 访达")
+
+    L10n.overrideLanguageForTesting = .es
+    expect(L10n.modeAlwaysVisible.contains("fijo y visible"), "Spanish modeAlwaysVisible grammar check")
+    expect(L10n.headerAutoHide(enabledCount: 1, total: 1).hasSuffix("1 pantalla"), "Spanish singular display header")
+
+    L10n.overrideLanguageForTesting = .fr
+    let frHeader = L10n.headerAutoHide(enabledCount: 1, total: 2)
+    expect(!frHeader.contains("actif sur 1 écran(s) sur"), "French header must not repeat 'sur ... sur'")
 
     for lang in AppLanguage.allCases where lang != .system {
-        DockSettings.shared.appLanguage = lang
+        L10n.overrideLanguageForTesting = lang
         expect(!L10n.tooltipStatus.isEmpty, "tooltipStatus empty for \(lang)")
+        expect(!L10n.finderLabel.isEmpty, "finderLabel empty for \(lang)")
+        expect(!L10n.runningAccessibilityState.isEmpty, "runningAccessibilityState empty for \(lang)")
         expect(!L10n.trashLabel.isEmpty, "trashLabel empty for \(lang)")
-        expect(!L10n.buyMeACoffee.isEmpty, "buyMeACoffee empty for \(lang)")
-        expect(!L10n.dragMoveErrorTitle.isEmpty, "dragMoveErrorTitle empty for \(lang)")
-        expect(!L10n.dockAutohidePermTitle.isEmpty, "dockAutohidePermTitle empty for \(lang)")
+        expect(!L10n.emptyTrashConfirmTitle.isEmpty, "emptyTrashConfirmTitle empty for \(lang)")
+        expect(!L10n.dragCopyErrorTitle.isEmpty, "dragCopyErrorTitle empty for \(lang)")
+        expect(!L10n.dockAutohideScriptErrorTitle.isEmpty, "dockAutohideScriptErrorTitle empty for \(lang)")
     }
 }
 
@@ -167,7 +311,12 @@ struct TestRunner {
         testIconSizingNeverOverflowsDisplay()
         testTriggerZoneStrictlyInsideKeepAliveZone()
         testAppInstanceMatcherURLPriority()
-        testLocalizationAllLanguagesNonEmpty()
+        testDockFileDataURLParsing()
+        testIdenticalMonitorsRuntimeKeyDisambiguation()
+        testStructuralSignatureInPlaceStateChanges()
+        testStackedDisplayGeometryDetection()
+        testSettingsBoundsValidationInIsolatedSuite()
+        testLocalizationAndLanguageDetectionSideEffectFree()
 
         print("MultiScreenDock Tests: \(passedTests) passed, \(failedTests) failed.")
         if failedTests > 0 {

@@ -7,16 +7,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let statusMenu = NSMenu()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        let bid = Bundle.main.bundleIdentifier ?? DockSettings.bundleIdentifier
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+        let alreadyRunning = NSRunningApplication.runningApplications(withBundleIdentifier: bid)
+            .contains { $0.processIdentifier != ownPID && !$0.isTerminated }
+        if alreadyRunning {
+            NSApp.terminate(nil)
+            return
+        }
+
         Self.shared = self
         NSApp.setActivationPolicy(.accessory)
+
+        if Bundle.main.bundleURL.pathExtension == "app" {
+            DockSettings.shared.migrateLegacyLaunchAgentIfNeeded()
+        }
 
         setupStatusItem()
         MultiScreenController.shared.start()
     }
 
-    func buildFreshSettingsMenu() -> NSMenu {
+    func buildFreshSettingsMenu(includeShortcuts: Bool = true) -> NSMenu {
         let m = NSMenu(title: "MultiScreenDock")
-        populateSettingsMenu(m)
+        populateSettingsMenu(m, includeShortcuts: includeShortcuts)
         return m
     }
 
@@ -38,10 +51,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Dynamic Menu Construction
 
     func menuNeedsUpdate(_ menu: NSMenu) {
-        populateSettingsMenu(menu)
+        populateSettingsMenu(menu, includeShortcuts: true)
     }
 
-    func populateSettingsMenu(_ menu: NSMenu) {
+    func populateSettingsMenu(_ menu: NSMenu, includeShortcuts: Bool = true) {
         menu.removeAllItems()
         statusItem?.button?.toolTip = L10n.tooltipStatus
         let settings = DockSettings.shared
@@ -175,12 +188,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             (L10n.sizeMedium, 44),
             (L10n.sizeLarge, 52)
         ]
+        var matchedPreset = false
         for (title, val) in sizes {
             let item = NSMenuItem(title: title, action: #selector(selectIconSize(_:)), keyEquivalent: "")
             item.target = self
             item.representedObject = val
-            item.state = abs(settings.iconSize - val) < 1 ? .on : .off
+            let isMatch = abs(settings.iconSize - val) < 1
+            if isMatch { matchedPreset = true }
+            item.state = isMatch ? .on : .off
             sizeSubmenu.addItem(item)
+        }
+        if let nativePts = DockSettings.readNativeTileSize(),
+           !sizes.contains(where: { abs(CGFloat(nativePts) - $0.1) < 1 }) || !matchedPreset {
+            let customPts = !matchedPreset ? settings.iconSize : CGFloat(nativePts)
+            sizeSubmenu.addItem(.separator())
+            let sysItem = NSMenuItem(
+                title: L10n.sizeSystemDock(Int(round(customPts))),
+                action: #selector(selectIconSize(_:)),
+                keyEquivalent: ""
+            )
+            sysItem.target = self
+            sysItem.representedObject = customPts
+            sysItem.state = !matchedPreset ? .on : .off
+            sizeSubmenu.addItem(sysItem)
         }
         let sizeParent = NSMenuItem(title: L10n.iconSizeMenu, action: nil, keyEquivalent: "")
         sizeParent.submenu = sizeSubmenu
@@ -188,15 +218,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Displays Submenu
         let screensSubmenu = NSMenu()
-        let hasStackedRows = NSScreen.screens.contains(where: { $0.frame.minY >= 600 })
-        for (idx, screen) in NSScreen.screens.enumerated() {
+        let screens = NSScreen.screens
+        let allFrames = screens.map { $0.frame }
+        for (idx, screen) in screens.enumerated() {
             let w = Int(screen.frame.width)
             let h = Int(screen.frame.height)
             let primaryTag = settings.isPrimaryDisplay(screen) ? ", \(L10n.primaryBadge)" : ""
+            let hasBelow = DockLayoutMath.hasMonitorDirectlyBelow(targetFrame: screen.frame, among: allFrames)
+            let hasAbove = DockLayoutMath.hasMonitorDirectlyAbove(targetFrame: screen.frame, among: allFrames)
             let suffix: String
-            if hasStackedRows {
-                let rowLabel = screen.frame.minY >= 600 ? L10n.rowUpper : L10n.rowLower
-                suffix = " — \(w)×\(h) (\(rowLabel)\(primaryTag))"
+            if hasBelow && !hasAbove {
+                suffix = " — \(w)×\(h) (\(L10n.rowUpper)\(primaryTag))"
+            } else if hasAbove && !hasBelow {
+                suffix = " — \(w)×\(h) (\(L10n.rowLower)\(primaryTag))"
             } else {
                 suffix = primaryTag.isEmpty ? " — \(w)×\(h)" : " — \(w)×\(h) (\(L10n.primaryBadge))"
             }
@@ -207,7 +241,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             sItem.state = settings.isScreenEnabled(screen) ? .on : .off
             screensSubmenu.addItem(sItem)
         }
-        let screensParent = NSMenuItem(title: L10n.activeScreensMenu(NSScreen.screens.count), action: nil, keyEquivalent: "")
+        let screensParent = NSMenuItem(title: L10n.activeScreensMenu(screens.count), action: nil, keyEquivalent: "")
         screensParent.submenu = screensSubmenu
         menu.addItem(screensParent)
 
@@ -234,16 +268,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        let reloadItem = NSMenuItem(title: L10n.syncNow, action: #selector(reloadNow), keyEquivalent: "r")
+        let reloadItem = NSMenuItem(title: L10n.syncNow, action: #selector(reloadNow), keyEquivalent: includeShortcuts ? "r" : "")
         reloadItem.target = self
         menu.addItem(reloadItem)
 
+        let loginStatus = settings.launchAtLogin
         let loginTitle = settings.launchAtLoginRequiresApproval
             ? "\(L10n.launchAtLogin)\(L10n.loginItemRequiresApprovalBadge)"
             : L10n.launchAtLogin
         let loginItem = NSMenuItem(title: loginTitle, action: #selector(toggleLaunchAtLogin), keyEquivalent: "")
         loginItem.target = self
-        loginItem.state = settings.launchAtLogin ? .on : .off
+        loginItem.state = loginStatus ? .on : .off
         menu.addItem(loginItem)
 
         menu.addItem(.separator())
@@ -258,7 +293,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        let quitItem = NSMenuItem(title: L10n.quitApp, action: #selector(quitApp), keyEquivalent: "q")
+        let quitItem = NSMenuItem(title: L10n.quitApp, action: #selector(quitApp), keyEquivalent: includeShortcuts ? "q" : "")
         quitItem.target = self
         menu.addItem(quitItem)
     }

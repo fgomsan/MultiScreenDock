@@ -3,11 +3,19 @@ import Cocoa
 final class MultiScreenController {
     static let shared = MultiScreenController()
 
+    private struct ScreenAutoHideContext {
+        let screen: NSScreen
+        let runtimeKey: String
+        let hasBelow: Bool
+    }
+
     private var panelsByScreenKey: [String: DockBarPanel] = [:]
     private var hintsByScreenKey: [String: EdgeHintPanel] = [:]
+    private var cachedAutoHideScreens: [ScreenAutoHideContext] = []
 
     private var revealWorkItems: [String: DispatchWorkItem] = [:]
     private var hideWorkItems: [String: DispatchWorkItem] = [:]
+    private var trailingMouseEval: DispatchWorkItem?
 
     private var globalMouseMonitor: Any?
     private var localMouseMonitor: Any?
@@ -39,31 +47,61 @@ final class MultiScreenController {
             wsnc.addObserver(self, selector: #selector(handleWorkspaceEvent), name: name, object: nil)
         }
 
-        installMouseMonitors()
         refreshAll(forceLayout: true)
 
-        pollTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in
             self?.periodicTick()
         }
+        timer.tolerance = 0.25
+        pollTimer = timer
     }
 
-    private func installMouseMonitors() {
-        let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged]
+    private func syncMouseMonitors(shouldListen: Bool) {
+        if shouldListen {
+            guard globalMouseMonitor == nil, localMouseMonitor == nil else { return }
+            let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged]
 
-        globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] _ in
-            self?.throttledMouseCheck()
-        }
+            globalMouseMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] _ in
+                self?.throttledMouseCheck()
+            }
 
-        localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
-            self?.throttledMouseCheck()
-            return event
+            localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
+                self?.throttledMouseCheck()
+                return event
+            }
+        } else {
+            trailingMouseEval?.cancel()
+            trailingMouseEval = nil
+            if let g = globalMouseMonitor {
+                NSEvent.removeMonitor(g)
+                globalMouseMonitor = nil
+            }
+            if let l = localMouseMonitor {
+                NSEvent.removeMonitor(l)
+                localMouseMonitor = nil
+            }
         }
     }
 
     private func throttledMouseCheck() {
         guard DockSettings.shared.visibilityMode == .autoHide else { return }
         let now = CFAbsoluteTimeGetCurrent()
-        if now - lastMouseEvalTime < 0.016 { return } // ~60 Hz max
+        let elapsed = now - lastMouseEvalTime
+        if elapsed < 0.016 {
+            trailingMouseEval?.cancel()
+            let remaining = max(0.004, 0.016 - elapsed)
+            let work = DispatchWorkItem { [weak self] in
+                guard let self = self else { return }
+                self.trailingMouseEval = nil
+                self.lastMouseEvalTime = CFAbsoluteTimeGetCurrent()
+                self.evaluateAutoHideState(at: NSEvent.mouseLocation)
+            }
+            trailingMouseEval = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + remaining, execute: work)
+            return
+        }
+        trailingMouseEval?.cancel()
+        trailingMouseEval = nil
         lastMouseEvalTime = now
         evaluateAutoHideState(at: NSEvent.mouseLocation)
     }
@@ -84,7 +122,7 @@ final class MultiScreenController {
         if plistChanged || sig != lastNativeInsetsSignature {
             lastNativeInsetsSignature = sig
             refreshAll(forceLayout: plistChanged)
-        } else if DockSettings.shared.visibilityMode == .autoHide {
+        } else if DockSettings.shared.visibilityMode == .autoHide && !cachedAutoHideScreens.isEmpty {
             evaluateAutoHideState(at: NSEvent.mouseLocation)
         }
     }
@@ -92,7 +130,7 @@ final class MultiScreenController {
     private func computeNativeInsetsSignature() -> String {
         NSScreen.screens.map { s in
             let insetBottom = Int(round(s.visibleFrame.minY - s.frame.minY))
-            return "\(DockSettings.shared.screenKey(for: s)):\(insetBottom)"
+            return "\(DockSettings.shared.runtimeScreenKey(for: s)):\(insetBottom)"
         }.joined(separator: "|")
     }
 
@@ -103,17 +141,6 @@ final class MultiScreenController {
         return (enabled, visibleNow, screens.count)
     }
 
-    private func hasMonitorDirectlyBelow(_ target: NSScreen, among screens: [NSScreen]) -> Bool {
-        for other in screens where other !== target {
-            let verticalTouch = abs(other.frame.maxY - target.frame.minY) <= 14.0
-            let overlapX = min(target.frame.maxX, other.frame.maxX) - max(target.frame.minX, other.frame.minX)
-            if verticalTouch && overlapX > 40.0 {
-                return true
-            }
-        }
-        return false
-    }
-
     private func cancelPendingTransitions(for key: String) {
         revealWorkItems[key]?.cancel()
         revealWorkItems.removeValue(forKey: key)
@@ -122,6 +149,8 @@ final class MultiScreenController {
     }
 
     private func cancelAllPendingTransitions() {
+        trailingMouseEval?.cancel()
+        trailingMouseEval = nil
         revealWorkItems.values.forEach { $0.cancel() }
         revealWorkItems.removeAll()
         hideWorkItems.values.forEach { $0.cancel() }
@@ -132,22 +161,46 @@ final class MultiScreenController {
 
     func refreshAll(forceLayout: Bool) {
         let screens = NSScreen.screens
+        let allFrames = screens.map { $0.frame }
         let settings = DockSettings.shared
-        let items = DockModelReader.shared.buildItems(includeUnpinnedRunning: settings.showRunningUnpinned)
+        let mode = settings.visibilityMode
+        let avoidOverlap = settings.avoidNativeDockOverlap
+
+        struct ScreenPlan {
+            let screen: NSScreen
+            let key: String
+            let eligible: Bool
+            let hasBelow: Bool
+        }
+
+        let plans: [ScreenPlan] = screens.map { screen in
+            let key = settings.runtimeScreenKey(for: screen)
+            let enabled = settings.isScreenEnabled(screen)
+            let nativeDockBottomInset = screen.visibleFrame.minY - screen.frame.minY
+            let suppressed = avoidOverlap && (nativeDockBottomInset > 10.0)
+            let hasBelow = DockLayoutMath.hasMonitorDirectlyBelow(targetFrame: screen.frame, among: allFrames)
+            return ScreenPlan(screen: screen, key: key, eligible: enabled && !suppressed, hasBelow: hasBelow)
+        }
+
+        let activeKeys = Set(plans.map { $0.key })
+        let eligiblePlans = plans.filter { $0.eligible }
+
+        cachedAutoHideScreens = (mode == .autoHide)
+            ? eligiblePlans.map { ScreenAutoHideContext(screen: $0.screen, runtimeKey: $0.key, hasBelow: $0.hasBelow) }
+            : []
+        syncMouseMonitors(shouldListen: mode == .autoHide && !eligiblePlans.isEmpty)
+
+        // Only enumerate Dock items & running apps when at least one display will actually render a bar
+        let items: [DockItem] = eligiblePlans.isEmpty
+            ? []
+            : DockModelReader.shared.buildItems(includeUnpinnedRunning: settings.showRunningUnpinned)
         let mousePos = NSEvent.mouseLocation
 
-        var activeKeys = Set<String>()
+        for plan in plans {
+            let screen = plan.screen
+            let key = plan.key
 
-        for screen in screens {
-            let key = settings.screenKey(for: screen)
-            activeKeys.insert(key)
-
-            let enabledOnThisScreen = settings.isScreenEnabled(screen)
-            let nativeDockBottomInset = screen.visibleFrame.minY - screen.frame.minY
-            let nativeDockVisibleHere = nativeDockBottomInset > 10.0
-            let suppressedByNative = settings.avoidNativeDockOverlap && nativeDockVisibleHere
-
-            if !enabledOnThisScreen || suppressedByNative {
+            if !plan.eligible {
                 cancelPendingTransitions(for: key)
                 panelsByScreenKey[key]?.conceal(animated: false)
                 hintsByScreenKey[key]?.orderOut(nil)
@@ -163,7 +216,7 @@ final class MultiScreenController {
             }
             panel.updateContentAndGeometry(items: items, on: screen, forceLayout: forceLayout)
 
-            switch settings.visibilityMode {
+            switch mode {
             case .alwaysVisible:
                 cancelPendingTransitions(for: key)
                 hintsByScreenKey[key]?.orderOut(nil)
@@ -173,16 +226,15 @@ final class MultiScreenController {
 
             case .autoHide:
                 updateHintVisibility(for: screen, key: key, dockRevealed: panel.isRevealed)
-                let hasBelow = hasMonitorDirectlyBelow(screen, among: screens)
                 let inKeepAlive = panel.keepAliveZone(on: screen).contains(mousePos)
-                let inTrigger = panel.triggerZone(on: screen, hasScreenBelow: hasBelow).contains(mousePos)
+                let inTrigger = panel.triggerZone(on: screen, hasScreenBelow: plan.hasBelow).contains(mousePos)
 
                 if panel.isRevealed {
                     if !inKeepAlive && !panel.isContextMenuOpen {
                         scheduleHideIfNeeded(for: key, screen: screen, panel: panel)
                     }
                 } else if inTrigger {
-                    scheduleRevealIfNeeded(for: key, screen: screen, panel: panel, hasBelow: hasBelow)
+                    scheduleRevealIfNeeded(for: key, screen: screen, panel: panel, hasBelow: plan.hasBelow)
                 }
             }
         }
@@ -206,26 +258,12 @@ final class MultiScreenController {
     // MARK: - Real-Time Auto-Hide State Machine
 
     private func evaluateAutoHideState(at mousePos: NSPoint) {
-        let screens = NSScreen.screens
-        let settings = DockSettings.shared
-        guard settings.visibilityMode == .autoHide else { return }
+        guard !cachedAutoHideScreens.isEmpty else { return }
 
-        for screen in screens {
-            let key = settings.screenKey(for: screen)
-            guard settings.isScreenEnabled(screen),
-                  let panel = panelsByScreenKey[key] else {
-                continue
-            }
-
-            let nativeDockVisibleHere = (screen.visibleFrame.minY - screen.frame.minY) > 10.0
-            if settings.avoidNativeDockOverlap && nativeDockVisibleHere {
-                cancelPendingTransitions(for: key)
-                if panel.isRevealed { panel.conceal(animated: false) }
-                hintsByScreenKey[key]?.orderOut(nil)
-                continue
-            }
-
-            let hasBelow = hasMonitorDirectlyBelow(screen, among: screens)
+        for ctx in cachedAutoHideScreens {
+            let key = ctx.runtimeKey
+            let screen = ctx.screen
+            guard let panel = panelsByScreenKey[key] else { continue }
 
             if panel.isRevealed {
                 revealWorkItems[key]?.cancel()
@@ -244,9 +282,9 @@ final class MultiScreenController {
                 hideWorkItems[key]?.cancel()
                 hideWorkItems.removeValue(forKey: key)
 
-                let insideTrigger = panel.triggerZone(on: screen, hasScreenBelow: hasBelow).contains(mousePos)
+                let insideTrigger = panel.triggerZone(on: screen, hasScreenBelow: ctx.hasBelow).contains(mousePos)
                 if insideTrigger {
-                    scheduleRevealIfNeeded(for: key, screen: screen, panel: panel, hasBelow: hasBelow)
+                    scheduleRevealIfNeeded(for: key, screen: screen, panel: panel, hasBelow: ctx.hasBelow)
                 } else if let pendingReveal = revealWorkItems[key] {
                     pendingReveal.cancel()
                     revealWorkItems.removeValue(forKey: key)
@@ -296,8 +334,9 @@ final class MultiScreenController {
                 return
             }
 
-            panel.conceal(animated: true)
-            self.updateHintVisibility(for: screen, key: key, dockRevealed: false)
+            panel.conceal(animated: true) { [weak self] in
+                self?.updateHintVisibility(for: screen, key: key, dockRevealed: false)
+            }
         }
 
         hideWorkItems[key] = work

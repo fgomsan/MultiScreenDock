@@ -96,6 +96,7 @@ final class HoverBubbleController {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
+        panel.appearance = NSAppearance(named: .darkAqua)
         panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.dockWindow)) + 2)
         panel.ignoresMouseEvents = true
         panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
@@ -160,7 +161,7 @@ final class HoverBubbleController {
 // MARK: - Individual Dock Tile View
 
 final class DockTileView: NSView {
-    let item: DockItem
+    private(set) var item: DockItem
     private let iconSize: CGFloat
     private let tilePadX: CGFloat
     private let imageView = NSImageView()
@@ -182,6 +183,7 @@ final class DockTileView: NSView {
         imageView.image = item.icon
         imageView.imageScaling = .scaleProportionallyUpOrDown
         imageView.wantsLayer = true
+        imageView.setAccessibilityElement(false)
         imageView.frame = NSRect(x: tilePadX, y: 9, width: iconSize, height: iconSize)
         addSubview(imageView)
 
@@ -191,11 +193,36 @@ final class DockTileView: NSView {
         updateRunningDot()
         layer?.addSublayer(dotLayer)
 
+        setAccessibilityElement(true)
+        setAccessibilityRole(.button)
+        updateAccessibilityAttributes()
+
         registerForDraggedTypes([.fileURL])
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    /// Updates running/frontmost state or Trash icon in-place without tearing down animations or hover tracking.
+    func update(item newItem: DockItem) {
+        let oldKind = self.item.kind
+        self.item = newItem
+        if oldKind != newItem.kind {
+            imageView.image = newItem.icon
+        }
+        updateRunningDot()
+        updateAccessibilityAttributes()
+    }
+
+    private func updateAccessibilityAttributes() {
+        setAccessibilityLabel(item.label)
+        setAccessibilityValue(item.isRunning ? L10n.runningAccessibilityState : nil)
+    }
+
+    override func accessibilityPerformPress() -> Bool {
+        activateItem(withModifiers: [])
+        return true
     }
 
     override func updateTrackingAreas() {
@@ -310,35 +337,49 @@ final class DockTileView: NSView {
     // MARK: - Actions
 
     private func activateItem(withModifiers flags: NSEvent.ModifierFlags) {
+        let cleanMods = flags
+            .intersection(.deviceIndependentFlagsMask)
+            .subtracting([.capsLock, .numericPad, .function])
+
         switch item.kind {
         case .finder:
             openFinder()
 
         case .application(let bundleID, let url):
-            if flags.contains(.command) {
+            if cleanMods.contains(.command) {
                 NSWorkspace.shared.activateFileViewerSelecting([url])
                 return
             }
             if let running = DockModelReader.findRunningApplication(bundleID: bundleID, url: url) {
-                if running.isActive && flags.contains(.option) {
+                if running.isActive && cleanMods.contains(.option) {
                     running.hide()
                     return
                 }
-                if flags.isEmpty || flags == .option {
+                if cleanMods.isEmpty || cleanMods == .option {
+                    let activated: Bool
                     if #available(macOS 14.0, *) {
-                        running.activate()
+                        activated = running.activate()
                     } else {
-                        running.activate(options: [.activateIgnoringOtherApps])
+                        activated = running.activate(options: [.activateIgnoringOtherApps])
                     }
-                    return
+                    if activated {
+                        return
+                    }
                 }
             }
             let config = NSWorkspace.OpenConfiguration()
             config.activates = true
-            NSWorkspace.shared.openApplication(at: url, configuration: config, completionHandler: nil)
+            NSWorkspace.shared.openApplication(at: url, configuration: config) { _, err in
+                if err != nil && !FileManager.default.fileExists(atPath: url.path) {
+                    DispatchQueue.main.async {
+                        DockModelReader.shared.reloadPlistCache()
+                        MultiScreenController.shared.refreshAll(forceLayout: true)
+                    }
+                }
+            }
 
         case .directoryOrFile(let url, _):
-            if flags.contains(.command) {
+            if cleanMods.contains(.command) {
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             } else {
                 NSWorkspace.shared.open(url)
@@ -382,6 +423,7 @@ final class DockTileView: NSView {
 
     private func buildContextMenu() -> NSMenu {
         let menu = NSMenu(title: item.label)
+        menu.autoenablesItems = false
 
         switch item.kind {
         case .finder:
@@ -437,7 +479,7 @@ final class DockTileView: NSView {
             break
         }
 
-        if let settingsMenu = AppDelegate.shared?.buildFreshSettingsMenu() {
+        if let settingsMenu = AppDelegate.shared?.buildFreshSettingsMenu(includeShortcuts: false) {
             menu.addItem(.separator())
             let subItem = NSMenuItem(title: L10n.dockSettingsSubmenu, action: nil, keyEquivalent: "")
             subItem.submenu = settingsMenu
@@ -481,6 +523,17 @@ final class DockTileView: NSView {
     }
 
     @objc private func ctxEmptyTrash() {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = L10n.emptyTrashConfirmTitle
+        alert.informativeText = L10n.emptyTrashConfirmMessage
+        let emptyBtn = alert.addButton(withTitle: L10n.emptyTrashConfirmBtn)
+        emptyBtn.hasDestructiveAction = true
+        let cancelBtn = alert.addButton(withTitle: L10n.cancelBtn)
+        cancelBtn.keyEquivalent = "\u{1b}"
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+
         let script = "tell application \"Finder\" to empty trash"
         if let ascript = NSAppleScript(source: script) {
             var err: NSDictionary?
@@ -491,13 +544,21 @@ final class DockTileView: NSView {
     // MARK: - Drag & Drop Support
 
     override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+        let mask = sender.draggingSourceOperationMask
         switch item.kind {
         case .application, .trash:
+            guard !mask.isEmpty else { return [] }
             animateHover(hovered: true)
             return .generic
         case .directoryOrFile(_, let isDir) where isDir:
-            animateHover(hovered: true)
-            return .move
+            if mask.contains(.move) {
+                animateHover(hovered: true)
+                return .move
+            } else if mask.contains(.copy) {
+                animateHover(hovered: true)
+                return .copy
+            }
+            return []
         default:
             return []
         }
@@ -509,6 +570,7 @@ final class DockTileView: NSView {
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
         animateHover(hovered: false)
+        let mask = sender.draggingSourceOperationMask
         guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
               !urls.isEmpty else {
             return false
@@ -529,45 +591,60 @@ final class DockTileView: NSView {
 
         case .directoryOrFile(let folderURL, let isDir) where isDir:
             let folderStd = folderURL.standardizedFileURL
-            var succeeded = 0
-            var failures: [String] = []
-            for fileURL in urls {
+            let actionable = urls.filter { fileURL in
                 let srcStd = fileURL.standardizedFileURL
-                if srcStd == folderStd || srcStd.deletingLastPathComponent() == folderStd {
-                    continue
+                return srcStd != folderStd && srcStd.deletingLastPathComponent() != folderStd
+            }
+            guard !actionable.isEmpty else { return false }
+
+            let forceCopy = !mask.contains(.move) && mask.contains(.copy)
+            let destVol = try? folderURL.resourceValues(forKeys: [.volumeIdentifierKey]).volumeIdentifier as? NSObject
+
+            DispatchQueue.global(qos: .userInitiated).async {
+                var failures: [String] = []
+                var anyCopied = false
+                for fileURL in actionable {
+                    let dest = folderURL.appendingPathComponent(fileURL.lastPathComponent)
+                    let srcVol = try? fileURL.resourceValues(forKeys: [.volumeIdentifierKey]).volumeIdentifier as? NSObject
+                    let crossVolume = (destVol != nil && srcVol != nil && destVol != srcVol)
+                    let shouldCopy = forceCopy || crossVolume
+                    if shouldCopy { anyCopied = true }
+                    do {
+                        if shouldCopy {
+                            try FileManager.default.copyItem(at: fileURL, to: dest)
+                        } else {
+                            try FileManager.default.moveItem(at: fileURL, to: dest)
+                        }
+                    } catch {
+                        failures.append("• \(fileURL.lastPathComponent): \(error.localizedDescription)")
+                    }
                 }
-                let dest = folderURL.appendingPathComponent(fileURL.lastPathComponent)
-                do {
-                    try FileManager.default.moveItem(at: fileURL, to: dest)
-                    succeeded += 1
-                } catch {
-                    failures.append("• \(fileURL.lastPathComponent): \(error.localizedDescription)")
+                if !failures.isEmpty {
+                    let title = anyCopied ? L10n.dragCopyErrorTitle : L10n.dragMoveErrorTitle
+                    DispatchQueue.main.async {
+                        Self.presentDragErrorAlert(title: title, details: failures)
+                    }
                 }
             }
-            if !failures.isEmpty {
-                DispatchQueue.main.async {
-                    Self.presentDragErrorAlert(title: L10n.dragMoveErrorTitle, details: failures)
-                }
-            }
-            return succeeded > 0
+            return true
 
         case .trash:
-            var succeeded = 0
-            var failures: [String] = []
-            for fileURL in urls {
-                do {
-                    try FileManager.default.trashItem(at: fileURL, resultingItemURL: nil)
-                    succeeded += 1
-                } catch {
-                    failures.append("• \(fileURL.lastPathComponent): \(error.localizedDescription)")
+            DispatchQueue.global(qos: .userInitiated).async {
+                var failures: [String] = []
+                for fileURL in urls {
+                    do {
+                        try FileManager.default.trashItem(at: fileURL, resultingItemURL: nil)
+                    } catch {
+                        failures.append("• \(fileURL.lastPathComponent): \(error.localizedDescription)")
+                    }
+                }
+                if !failures.isEmpty {
+                    DispatchQueue.main.async {
+                        Self.presentDragErrorAlert(title: L10n.dragTrashErrorTitle, details: failures)
+                    }
                 }
             }
-            if !failures.isEmpty {
-                DispatchQueue.main.async {
-                    Self.presentDragErrorAlert(title: L10n.dragTrashErrorTitle, details: failures)
-                }
-            }
-            return succeeded > 0
+            return true
 
         default:
             return false
@@ -677,6 +754,47 @@ enum DockLayoutMath {
         )
         return barKeep.union(maxTrigger)
     }
+
+    /// Structural identity of the Dock bar layout (excluding transient running/frontmost dots or empty/full Trash icon).
+    /// Allows `DockBarPanel` to update running indicators in-place without destroying views or interrupting animations.
+    static func structuralSignature(for items: [DockItem]) -> [String] {
+        items.map { item in
+            switch item.kind {
+            case .finder:
+                return "finder|\(item.id)|\(item.label)"
+            case .application(let bid, let url):
+                return "app|\(item.id)|\(item.label)|\(bid ?? "")|\(url.path)"
+            case .directoryOrFile(let url, let isDir):
+                return "item|\(item.id)|\(item.label)|\(url.path)|\(isDir)"
+            case .separator:
+                return "sep|\(item.id)"
+            case .trash:
+                return "trash|\(item.id)|\(item.label)"
+            }
+        }
+    }
+
+    static func hasMonitorDirectlyBelow(targetFrame: NSRect, among screenFrames: [NSRect]) -> Bool {
+        for other in screenFrames where other != targetFrame {
+            let verticalTouch = abs(other.maxY - targetFrame.minY) <= 14.0
+            let overlapX = min(targetFrame.maxX, other.maxX) - max(targetFrame.minX, other.minX)
+            if verticalTouch && overlapX > 40.0 {
+                return true
+            }
+        }
+        return false
+    }
+
+    static func hasMonitorDirectlyAbove(targetFrame: NSRect, among screenFrames: [NSRect]) -> Bool {
+        for other in screenFrames where other != targetFrame {
+            let verticalTouch = abs(other.minY - targetFrame.maxY) <= 14.0
+            let overlapX = min(targetFrame.maxX, other.maxX) - max(targetFrame.minX, other.minX)
+            if verticalTouch && overlapX > 40.0 {
+                return true
+            }
+        }
+        return false
+    }
 }
 
 final class ClippedPassthroughRootView: NSView {
@@ -692,7 +810,7 @@ final class ClippedPassthroughRootView: NSView {
             let ptInTiles = sliding.convert(ptInSliding, to: container)
             for sub in container.subviews {
                 if sub is DockTileView, sub.frame.contains(ptInTiles) {
-                    return sub.hitTest(container.convert(ptInTiles, to: sub)) ?? sub
+                    return sub
                 }
             }
         }
@@ -717,6 +835,7 @@ final class DockBarPanel: NSPanel {
     private let itemsContainer = NSView()
 
     private var currentItems: [DockItem] = []
+    private var lastStructuralSignature: [String] = []
     private var lastEffectiveIconSize: CGFloat = 0
     private(set) var currentBarSize: NSSize = NSSize(width: 400, height: 52)
 
@@ -754,11 +873,12 @@ final class DockBarPanel: NSPanel {
         shadowCarrier.layer?.cornerRadius = 17
         shadowCarrier.layer?.cornerCurve = .continuous
         shadowCarrier.layer?.shadowColor = NSColor.black.cgColor
-        shadowCarrier.layer?.shadowOpacity = 0.36
+        shadowCarrier.layer?.shadowOpacity = 0.24
         shadowCarrier.layer?.shadowRadius = 10
         shadowCarrier.layer?.shadowOffset = CGSize(width: 0, height: -3)
         slidingContainer.addSubview(shadowCarrier)
 
+        backgroundView.appearance = NSAppearance(named: .darkAqua)
         backgroundView.material = .hudWindow
         backgroundView.blendingMode = .behindWindow
         backgroundView.state = .active
@@ -788,7 +908,7 @@ final class DockBarPanel: NSPanel {
     }
 
     private func presentDockSettingsMenu(with event: NSEvent) {
-        guard let settingsMenu = AppDelegate.shared?.buildFreshSettingsMenu(),
+        guard let settingsMenu = AppDelegate.shared?.buildFreshSettingsMenu(includeShortcuts: true),
               let targetView = contentView else { return }
         HoverBubbleController.shared.hide()
         isContextMenuOpen = true
@@ -810,14 +930,20 @@ final class DockBarPanel: NSPanel {
         let preferredSize = DockSettings.shared.iconSize
         let maxBarWidth = screen.frame.width * 0.97
         let effectiveSize = computeEffectiveIconSize(items: items, preferred: preferredSize, maxWidth: maxBarWidth)
+        let signature = DockLayoutMath.structuralSignature(for: items)
 
-        let needsRebuild = forceLayout || (items != currentItems) || (abs(effectiveSize - lastEffectiveIconSize) > 0.25)
-        if needsRebuild {
+        let needsStructuralRebuild = forceLayout
+            || signature != lastStructuralSignature
+            || abs(effectiveSize - lastEffectiveIconSize) > 0.25
+
+        if needsStructuralRebuild {
             currentItems = items
+            lastStructuralSignature = signature
             lastEffectiveIconSize = effectiveSize
             rebuildSubviews(items: items, iconSize: effectiveSize)
-        } else {
-            currentBarSize = barSize(for: items, iconSize: effectiveSize)
+        } else if items != currentItems {
+            currentItems = items
+            updateTileStatesInPlace(items: items)
         }
 
         positionWindowFrame(on: screen)
@@ -828,11 +954,22 @@ final class DockBarPanel: NSPanel {
         }
     }
 
+    private func updateTileStatesInPlace(items: [DockItem]) {
+        let nonSeparatorItems = items.filter { $0.kind != .separator }
+        let tiles = itemsContainer.subviews.compactMap { $0 as? DockTileView }
+        guard tiles.count == nonSeparatorItems.count else {
+            rebuildSubviews(items: items, iconSize: lastEffectiveIconSize)
+            return
+        }
+        for (tile, item) in zip(tiles, nonSeparatorItems) {
+            tile.update(item: item)
+        }
+    }
+
     // MARK: - Animated Reveal & Conceal
 
     func reveal(animated: Bool, on screen: NSScreen) {
         animationToken &+= 1
-        let wasRevealed = isRevealed
         isRevealed = true
         ignoresMouseEvents = false
 
@@ -841,12 +978,11 @@ final class DockBarPanel: NSPanel {
         let targetY = DockSettings.shared.bottomMargin
         let hiddenY = -(currentBarSize.height + 10)
 
+        // If concealed half-way, animate smoothly from current slidingContainer origin; if fully ordered out, start from hiddenY.
         if !isVisible {
             slidingContainer.frame.origin = NSPoint(x: sideShadowPad, y: animated ? hiddenY : targetY)
             slidingContainer.alphaValue = animated ? 0.0 : 1.0
             orderFrontRegardless()
-        } else if !wasRevealed && animated {
-            // Estaba a mitad de ocultarse: continuamos suavemente desde su posición actual
         }
 
         if animated {
@@ -862,8 +998,11 @@ final class DockBarPanel: NSPanel {
         }
     }
 
-    func conceal(animated: Bool) {
-        guard isRevealed || isVisible else { return }
+    func conceal(animated: Bool, onConcealed: (() -> Void)? = nil) {
+        guard isRevealed || isVisible else {
+            onConcealed?()
+            return
+        }
         animationToken &+= 1
         let token = animationToken
         isRevealed = false
@@ -880,6 +1019,7 @@ final class DockBarPanel: NSPanel {
             slidingContainer.frame.origin = NSPoint(x: sideShadowPad, y: hiddenY)
             slidingContainer.alphaValue = 0.0
             orderOut(nil)
+            onConcealed?()
             return
         }
 
@@ -892,6 +1032,7 @@ final class DockBarPanel: NSPanel {
             guard let self = self else { return }
             if self.animationToken == token && !self.isRevealed {
                 self.orderOut(nil)
+                onConcealed?()
             }
         })
     }
@@ -933,6 +1074,7 @@ final class DockBarPanel: NSPanel {
 
         slidingContainer.frame.size = NSSize(width: barSz.width, height: barSz.height + topHeadroom)
         shadowCarrier.frame = NSRect(x: 0, y: 0, width: barSz.width, height: barSz.height)
+        shadowCarrier.layer?.shadowPath = CGPath(roundedRect: shadowCarrier.bounds, cornerWidth: 17, cornerHeight: 17, transform: nil)
         backgroundView.frame = NSRect(x: 0, y: 0, width: barSz.width, height: barSz.height)
         itemsContainer.frame = NSRect(x: 0, y: 0, width: barSz.width, height: barSz.height + topHeadroom)
 

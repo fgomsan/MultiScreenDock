@@ -17,9 +17,8 @@ cask "multiscreendock" do
 
   app "MultiScreenDock.app"
 
-  uninstall quit: "io.github.fgomsan.MultiScreenDock",
-            launchctl: "io.github.fgomsan.multiscreendock",
-            delete: "~/Library/LaunchAgents/io.github.fgomsan.multiscreendock.plist"
+  uninstall login_item: "MultiScreenDock",
+            quit: "io.github.fgomsan.MultiScreenDock"
 
   zap trash: "~/Library/Preferences/io.github.fgomsan.MultiScreenDock.plist"
 end

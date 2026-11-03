@@ -26,36 +26,69 @@ struct DockItem: Equatable {
 }
 
 enum AppInstanceMatcher {
+    struct IndexedCandidate {
+        let bundleID: String?
+        let bundleURL: URL?
+        let normalizedPath: String?
+        let standardizedPath: String?
+        let lastPathComponent: String?
+    }
+
     static func normalizedPath(_ url: URL) -> String {
         url.resolvingSymlinksInPath().standardizedFileURL.path
     }
 
+    static func indexCandidates(_ candidates: [(bundleID: String?, bundleURL: URL?)]) -> [IndexedCandidate] {
+        candidates.map { cand in
+            guard let u = cand.bundleURL else {
+                return IndexedCandidate(bundleID: cand.bundleID, bundleURL: nil, normalizedPath: nil, standardizedPath: nil, lastPathComponent: nil)
+            }
+            return IndexedCandidate(
+                bundleID: cand.bundleID,
+                bundleURL: u,
+                normalizedPath: normalizedPath(u),
+                standardizedPath: u.standardizedFileURL.path,
+                lastPathComponent: u.lastPathComponent
+            )
+        }
+    }
+
     /// Matches a running app instance by exact bundle path first. Falls back to bundleIdentifier only when
-    /// macOS mounts a system app via Cryptex/System firmlinks (e.g. Safari) with the same bundle filename,
-    /// preventing two distinct copies of an app (e.g. Xcode vs Xcode-beta) from confusing Hide/Quit/dots.
+    /// macOS mounts a system app via Cryptex/System firmlinks (e.g. Safari) or Gatekeeper AppTranslocation
+    /// with the same bundle filename, preventing two distinct copies of an app (e.g. Xcode vs Xcode-beta)
+    /// from confusing Hide/Quit/dots.
     static func preferredIndex(
         targetBundleID: String?,
         targetURL: URL,
-        candidates: [(bundleID: String?, bundleURL: URL?)]
+        indexedCandidates: [IndexedCandidate]
     ) -> Int? {
         let targetNorm = normalizedPath(targetURL)
-        if let exactIdx = candidates.firstIndex(where: { cand in
-            guard let u = cand.bundleURL else { return false }
-            return normalizedPath(u) == targetNorm
-        }) {
+        if let exactIdx = indexedCandidates.firstIndex(where: { $0.normalizedPath == targetNorm }) {
             return exactIdx
         }
 
         guard let bid = targetBundleID, !bid.isEmpty else { return nil }
         let targetName = targetURL.lastPathComponent
-        return candidates.firstIndex(where: { cand in
+        return indexedCandidates.firstIndex(where: { cand in
             guard cand.bundleID == bid else { return false }
-            guard let candURL = cand.bundleURL else { return true }
-            let candPath = candURL.standardizedFileURL.path
-            let isSystemAlias = (candPath.hasPrefix("/System/") || targetNorm.hasPrefix("/System/"))
-                && candURL.lastPathComponent == targetName
-            return isSystemAlias
+            guard let candPath = cand.standardizedPath, let candName = cand.lastPathComponent else { return true }
+            guard candName == targetName else { return false }
+            let isSystemAlias = candPath.hasPrefix("/System/") || targetNorm.hasPrefix("/System/")
+            let isTranslocated = candPath.contains("/AppTranslocation/")
+            return isSystemAlias || isTranslocated
         })
+    }
+
+    static func preferredIndex(
+        targetBundleID: String?,
+        targetURL: URL,
+        candidates: [(bundleID: String?, bundleURL: URL?)]
+    ) -> Int? {
+        preferredIndex(
+            targetBundleID: targetBundleID,
+            targetURL: targetURL,
+            indexedCandidates: indexCandidates(candidates)
+        )
     }
 }
 
@@ -64,6 +97,8 @@ final class DockModelReader {
 
     private var iconCache: [String: NSImage] = [:]
     private var lastPlistModDate: Date?
+    private var lastTrashModDate: Date?
+    private var cachedTrashNonEmpty: Bool?
     private var cachedPersistentApps: [(label: String, bundleID: String?, url: URL)] = []
     private var cachedPersistentOthers: [(label: String, url: URL, isDirectory: Bool)] = []
     private var cachedTrashFullFromPlist: Bool = false
@@ -75,6 +110,32 @@ final class DockModelReader {
 
     private init() {
         reloadPlistCache()
+    }
+
+    /// Parses a `file-data` dictionary from `com.apple.dock.plist`, supporting both `_CFURLStringType = 15`
+    /// (`file:///...` URLs) and `_CFURLStringType = 0` (POSIX paths written by `defaults write` scripts).
+    static func parseDockFileURL(from fileData: [String: Any]?) -> URL? {
+        guard let raw = fileData?["_CFURLString"] as? String, !raw.isEmpty else { return nil }
+        let urlType = fileData?["_CFURLStringType"] as? Int ?? (raw.hasPrefix("/") ? 0 : 15)
+        if urlType == 0 || raw.hasPrefix("/") {
+            return URL(fileURLWithPath: raw)
+        }
+        guard let u = URL(string: raw), u.isFileURL else { return nil }
+        return u
+    }
+
+    private static func resolveBookmarkAliasURL(from fileData: [String: Any]?) -> URL? {
+        guard let aliasData = fileData?["_CFURLAliasData"] as? Data else { return nil }
+        var isStale = false
+        guard let resolved = try? URL(
+            resolvingBookmarkData: aliasData,
+            options: [.withoutUI, .withoutMounting],
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ), resolved.isFileURL, FileManager.default.fileExists(atPath: resolved.path) else {
+            return nil
+        }
+        return resolved
     }
 
     @discardableResult
@@ -115,12 +176,14 @@ final class DockModelReader {
 
                 let bundleID = tileData["bundle-identifier"] as? String
                 let rawLabel = tileData["file-label"] as? String
-                let urlString = (tileData["file-data"] as? [String: Any])?["_CFURLString"] as? String
+                let fileData = tileData["file-data"] as? [String: Any]
 
                 var resolvedURL: URL?
-                if let urlString = urlString, let candidate = URL(string: urlString),
+                if let candidate = Self.parseDockFileURL(from: fileData),
                    FileManager.default.fileExists(atPath: candidate.path) {
                     resolvedURL = candidate
+                } else if let aliasCandidate = Self.resolveBookmarkAliasURL(from: fileData) {
+                    resolvedURL = aliasCandidate
                 } else if let bundleID = bundleID,
                           let candidate = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) {
                     resolvedURL = candidate
@@ -138,12 +201,18 @@ final class DockModelReader {
             for entry in rawOthers {
                 let tileType = entry["tile-type"] as? String ?? "file-tile"
                 if tileType.contains("spacer") { continue }
-                guard let tileData = entry["tile-data"] as? [String: Any],
-                      let urlString = (tileData["file-data"] as? [String: Any])?["_CFURLString"] as? String,
-                      let fileURL = URL(string: urlString),
-                      FileManager.default.fileExists(atPath: fileURL.path) else {
-                    continue
+                guard let tileData = entry["tile-data"] as? [String: Any] else { continue }
+                let fileData = tileData["file-data"] as? [String: Any]
+
+                let resolvedOtherURL: URL?
+                if let candidate = Self.parseDockFileURL(from: fileData),
+                   FileManager.default.fileExists(atPath: candidate.path) {
+                    resolvedOtherURL = candidate
+                } else {
+                    resolvedOtherURL = Self.resolveBookmarkAliasURL(from: fileData)
                 }
+
+                guard let fileURL = resolvedOtherURL else { continue }
                 var isDir: ObjCBool = false
                 FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDir)
                 let label = (tileData["file-label"] as? String) ?? fileURL.lastPathComponent
@@ -151,6 +220,17 @@ final class DockModelReader {
             }
         }
         cachedPersistentOthers = othersResult
+
+        if !clearIcons {
+            var keepKeys: Set<String> = [
+                "/System/Library/CoreServices/Finder.app",
+                "__trash_full__",
+                "__trash_empty__"
+            ]
+            for a in appsResult { keepKeys.insert(a.url.path) }
+            for o in othersResult { keepKeys.insert(o.url.path) }
+            iconCache = iconCache.filter { keepKeys.contains($0.key) }
+        }
     }
 
     static func findRunningApplication(
@@ -173,6 +253,9 @@ final class DockModelReader {
     func buildItems(includeUnpinnedRunning: Bool) -> [DockItem] {
         let workspace = NSWorkspace.shared
         let runningApps = workspace.runningApplications.filter { !$0.isTerminated }
+        let indexedRunning = AppInstanceMatcher.indexCandidates(
+            runningApps.map { (bundleID: $0.bundleIdentifier, bundleURL: $0.bundleURL) }
+        )
         let frontmostPID = workspace.frontmostApplication?.processIdentifier
         let frontmostBundleID = workspace.frontmostApplication?.bundleIdentifier
 
@@ -187,7 +270,7 @@ final class DockModelReader {
         }
         items.append(DockItem(
             id: "finder",
-            label: "Finder",
+            label: L10n.finderLabel,
             kind: .finder,
             icon: iconForFile(finderURL.path),
             isRunning: true,
@@ -198,7 +281,12 @@ final class DockModelReader {
         for (idx, entry) in cachedPersistentApps.enumerated() {
             if entry.bundleID == finderBundleID { continue }
 
-            let matchedApp = Self.findRunningApplication(bundleID: entry.bundleID, url: entry.url, among: runningApps)
+            let matchedIdx = AppInstanceMatcher.preferredIndex(
+                targetBundleID: entry.bundleID,
+                targetURL: entry.url,
+                indexedCandidates: indexedRunning
+            )
+            let matchedApp = matchedIdx.map { runningApps[$0] }
             if let matched = matchedApp {
                 claimedPIDs.insert(matched.processIdentifier)
             }
@@ -303,11 +391,19 @@ final class DockModelReader {
         guard let trashURL = FileManager.default.urls(for: .trashDirectory, in: .userDomainMask).first else {
             return nil
         }
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: trashURL.path),
+           let modDate = attrs[.modificationDate] as? Date {
+            if lastTrashModDate == modDate, let cached = cachedTrashNonEmpty {
+                return cached
+            }
+            lastTrashModDate = modDate
+        }
         guard let contents = try? FileManager.default.contentsOfDirectory(atPath: trashURL.path) else {
             return nil
         }
-        let meaningful = contents.filter { $0 != ".DS_Store" }
-        return !meaningful.isEmpty
+        let nonEmpty = contents.contains { $0 != ".DS_Store" }
+        cachedTrashNonEmpty = nonEmpty
+        return nonEmpty
     }
 
     private func trashIcon(isFull: Bool) -> NSImage {

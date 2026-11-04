@@ -912,4 +912,187 @@ enum L10n {
             zh: "（需在系统设置中批准）"
         )
     }
+
+    // MARK: - Feedback & Updates (v1.3.5)
+    static var suggestImprovement: String {
+        tr(
+            en: "Suggest an Improvement or Report Bug…",
+            es: "Sugerir mejora o informar de un fallo…",
+            fr: "Suggérer une amélioration ou signaler un bug…",
+            de: "Verbesserung vorschlagen oder Fehler melden…",
+            pt: "Sugerir melhoria ou relatar problema…",
+            it: "Suggerisci un miglioramento o segnala un bug…",
+            ja: "改善の提案・バグを報告…",
+            zh: "提出改进建议或反馈问题…"
+        )
+    }
+
+    static var checkForUpdates: String {
+        tr(
+            en: "Check for Updates…",
+            es: "Buscar actualizaciones…",
+            fr: "Rechercher des mises à jour…",
+            de: "Nach Updates suchen…",
+            pt: "Buscar atualizações…",
+            it: "Controlla aggiornamenti…",
+            ja: "アップデートを確認…",
+            zh: "检查更新…"
+        )
+    }
+
+    static var autoCheckUpdates: String {
+        tr(
+            en: "Check for Updates Automatically",
+            es: "Comprobar actualizaciones automáticamente",
+            fr: "Rechercher automatiquement les mises à jour",
+            de: "Automatisch nach Updates suchen",
+            pt: "Verificar atualizações automaticamente",
+            it: "Controlla automaticamente gli aggiornamenti",
+            ja: "アップデートを自動的に確認",
+            zh: "自动检查更新"
+        )
+    }
+
+    static func updateAvailableMenu(_ version: String) -> String {
+        tr(
+            en: "✨ Update Available (v\(version))…",
+            es: "✨ Actualización disponible (v\(version))…",
+            fr: "✨ Mise à jour disponible (v\(version))…",
+            de: "✨ Update verfügbar (v\(version))…",
+            pt: "✨ Atualização disponível (v\(version))…",
+            it: "✨ Aggiornamento disponibile (v\(version))…",
+            ja: "✨ アップデート利用可能 (v\(version))…",
+            zh: "✨ 发现新版本 (v\(version))…"
+        )
+    }
+
+    static func updateAvailableTitle(_ version: String) -> String {
+        tr(
+            en: "MultiScreenDock v\(version) Is Available",
+            es: "MultiScreenDock v\(version) está disponible",
+            fr: "MultiScreenDock v\(version) est disponible",
+            de: "MultiScreenDock v\(version) ist verfügbar",
+            pt: "MultiScreenDock v\(version) está disponível",
+            it: "MultiScreenDock v\(version) è disponibile",
+            ja: "MultiScreenDock v\(version) が利用可能です",
+            zh: "MultiScreenDock v\(version) 现已推出"
+        )
+    }
+
+    static func updateCurrentVersionNote(_ current: String) -> String {
+        tr(
+            en: "You are currently running v\(current).",
+            es: "Actualmente estás usando la v\(current).",
+            fr: "Vous utilisez actuellement la v\(current).",
+            de: "Aktuell ist v\(current) installiert.",
+            pt: "Você está usando atualmente a v\(current).",
+            it: "Stai attualmente usando la v\(current).",
+            ja: "現在のバージョンは v\(current) です。",
+            zh: "当前运行版本为 v\(current)。"
+        )
+    }
+
+    static var updateInstallAndRelaunchBtn: String {
+        tr(
+            en: "Install & Relaunch",
+            es: "Instalar y reiniciar",
+            fr: "Installer et relancer",
+            de: "Installieren & neu starten",
+            pt: "Instalar e reiniciar",
+            it: "Installa e riavvia",
+            ja: "インストールして再起動",
+            zh: "安装并重启"
+        )
+    }
+
+    static var updateViewOnGitHubBrewBtn: String {
+        tr(
+            en: "Open Release / Copy Homebrew Upgrade",
+            es: "Abrir Release / Copiar comando Homebrew",
+            fr: "Ouvrir la version / Copier la commande Homebrew",
+            de: "Release öffnen / Homebrew-Befehl kopieren",
+            pt: "Abrir Release / Copiar comando Homebrew",
+            it: "Apri Release / Copia comando Homebrew",
+            ja: "リリースを開く / Homebrewコマンドをコピー",
+            zh: "打开下载页 / 复制 Homebrew 更新命令"
+        )
+    }
+
+    static var updateLaterBtn: String {
+        tr(
+            en: "Later",
+            es: "Más tarde",
+            fr: "Plus tard",
+            de: "Später",
+            pt: "Mais tarde",
+            it: "Più tardi",
+            ja: "後で",
+            zh: "稍后"
+        )
+    }
+
+    static var upToDateTitle: String {
+        tr(
+            en: "You’re Up to Date!",
+            es: "¡Estás al día!",
+            fr: "Vous êtes à jour !",
+            de: "Du bist auf dem neuesten Stand!",
+            pt: "Tudo atualizado!",
+            it: "Sei aggiornato!",
+            ja: "最新の状態です！",
+            zh: "已是最新版本！"
+        )
+    }
+
+    static func upToDateMessage(_ version: String) -> String {
+        tr(
+            en: "MultiScreenDock v\(version) is currently the newest version available.",
+            es: "MultiScreenDock v\(version) es la versión más reciente disponible.",
+            fr: "MultiScreenDock v\(version) est la version la plus récente disponible.",
+            de: "MultiScreenDock v\(version) ist derzeit die neueste verfügbare Version.",
+            pt: "MultiScreenDock v\(version) é atualmente a versão mais recente disponível.",
+            it: "MultiScreenDock v\(version) è attualmente la versione più recente disponibile.",
+            ja: "MultiScreenDock v\(version) は現在利用可能な最新バージョンです。",
+            zh: "MultiScreenDock v\(version) 已是当前最新可用版本。"
+        )
+    }
+
+    static var updateCheckErrorTitle: String {
+        tr(
+            en: "Could Not Check for Updates",
+            es: "No se pudieron comprobar las actualizaciones",
+            fr: "Impossible de vérifier les mises à jour",
+            de: "Updates konnten nicht geprüft werden",
+            pt: "Não foi possível verificar atualizações",
+            it: "Impossibile controllare gli aggiornamenti",
+            ja: "アップデートを確認できませんでした",
+            zh: "无法检查更新"
+        )
+    }
+
+    static var updateInstallErrorTitle: String {
+        tr(
+            en: "Automatic Update Could Not Complete",
+            es: "No se pudo completar la actualización automática",
+            fr: "La mise à jour automatique a échoué",
+            de: "Automatisches Update fehlgeschlagen",
+            pt: "Não foi possível concluir a atualização automática",
+            it: "Aggiornamento automatico non riuscito",
+            ja: "自動アップデートを完了できませんでした",
+            zh: "自动更新未能完成"
+        )
+    }
+
+    static var updateInstallFallbackMessage: String {
+        tr(
+            en: "Opening the official GitHub Release page instead so you can download it directly (or upgrade via Homebrew).",
+            es: "Se abrirá la página oficial de GitHub Releases para descargarla directamente (o actualizar con Homebrew).",
+            fr: "Ouverture de la page GitHub Releases pour télécharger directement (ou mettre à jour via Homebrew).",
+            de: "Die offizielle GitHub-Release-Seite wird geöffnet, damit du das Update direkt laden kannst (oder per Homebrew).",
+            pt: "Abrindo a página oficial do GitHub Releases para baixar diretamente (ou atualizar via Homebrew).",
+            it: "Apertura della pagina ufficiale GitHub Releases per scaricarlo direttamente (o aggiornare con Homebrew).",
+            ja: "直接ダウンロード（またはHomebrewで更新）できるよう公式GitHubリリースページを開きます。",
+            zh: "正在打开官方 GitHub Releases 页面以便直接下载（或通过 Homebrew 更新）。"
+        )
+    }
 }

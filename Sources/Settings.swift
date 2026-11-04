@@ -64,6 +64,15 @@ enum AutoHideResponsiveness: String {
     }
 }
 
+struct ScreenIdentityDescriptor: Equatable {
+    let index: Int
+    let baseKey: String
+    let originX: Int
+    let originY: Int
+    let unitNumber: UInt32
+    let displayID: CGDirectDisplayID
+}
+
 final class DockSettings {
     static let shared = DockSettings()
 
@@ -85,6 +94,8 @@ final class DockSettings {
         static let bottomMargin = "bottomMargin"
         static let disabledScreens = "disabledScreens"
         static let appLanguage = "appLanguage"
+        static let autoCheckUpdates = "autoCheckUpdates"
+        static let lastUpdateCheckTimestamp = "lastUpdateCheckTimestamp"
     }
 
     var onChange: (() -> Void)?
@@ -104,7 +115,9 @@ final class DockSettings {
             Keys.showRunningUnpinned: true,
             Keys.bottomMargin: 6.0,
             Keys.disabledScreens: [String](),
-            Keys.appLanguage: AppLanguage.system.rawValue
+            Keys.appLanguage: AppLanguage.system.rawValue,
+            Keys.autoCheckUpdates: true,
+            Keys.lastUpdateCheckTimestamp: 0.0
         ])
     }
 
@@ -237,6 +250,19 @@ final class DockSettings {
         }
     }
 
+    var autoCheckUpdates: Bool {
+        get { defaults.bool(forKey: Keys.autoCheckUpdates) }
+        set {
+            defaults.set(newValue, forKey: Keys.autoCheckUpdates)
+            onChange?()
+        }
+    }
+
+    var lastUpdateCheckTimestamp: TimeInterval {
+        get { defaults.double(forKey: Keys.lastUpdateCheckTimestamp) }
+        set { defaults.set(newValue, forKey: Keys.lastUpdateCheckTimestamp) }
+    }
+
     func displayID(for screen: NSScreen) -> CGDirectDisplayID? {
         guard let num = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else {
             return nil
@@ -258,6 +284,34 @@ final class DockSettings {
         return "\(persistentKey)#\(id)"
     }
 
+    /// Resolves persistent preference keys across connected screens.
+    /// Single-instance hardware UUIDs stay untouched (`uuid:...`), preserving position-independence.
+    /// When 2+ identical monitors share the exact same hardware `baseKey` (e.g., cloned EDID or MST hub),
+    /// they are deterministically disambiguated by arrangement slot (`@slot:1`, `@slot:2`, ...) ordered by
+    /// `(originX, originY, unitNumber, displayID)` so each twin monitor can be toggled independently across reboots.
+    static func resolvePersistentScreenKeys(for descriptors: [ScreenIdentityDescriptor]) -> [String] {
+        guard !descriptors.isEmpty else { return [] }
+        var countsByBase: [String: Int] = [:]
+        for d in descriptors {
+            countsByBase[d.baseKey, default: 0] += 1
+        }
+
+        var resolved = descriptors.map { $0.baseKey }
+        for (baseKey, count) in countsByBase where count > 1 {
+            let group = descriptors.filter { $0.baseKey == baseKey }.sorted { a, b in
+                if a.originX != b.originX { return a.originX < b.originX }
+                if a.originY != b.originY { return a.originY < b.originY }
+                if a.unitNumber != b.unitNumber { return a.unitNumber < b.unitNumber }
+                if a.displayID != b.displayID { return a.displayID < b.displayID }
+                return a.index < b.index
+            }
+            for (slotOffset, item) in group.enumerated() where item.index >= 0 && item.index < resolved.count {
+                resolved[item.index] = "\(baseKey)@slot:\(slotOffset + 1)"
+            }
+        }
+        return resolved
+    }
+
     /// Persistent hardware identifier across macOS reboots using ColorSync/EDID display UUID.
     func screenKey(for screen: NSScreen) -> String {
         if let id = displayID(for: screen) {
@@ -274,6 +328,42 @@ final class DockSettings {
             return "hw:\(vendor)-\(model)-\(serial)-\(builtin)-\(screen.localizedName)"
         }
         return screen.localizedName
+    }
+
+    private func persistentScreenKeyInfo(
+        for screen: NSScreen,
+        among screens: [NSScreen] = NSScreen.screens
+    ) -> (effectiveKey: String, baseKey: String, siblingEffectiveKeys: [String]) {
+        let base = screenKey(for: screen)
+        guard !screens.isEmpty else {
+            return (base, base, [base])
+        }
+        let descriptors: [ScreenIdentityDescriptor] = screens.enumerated().map { idx, s in
+            let id = displayID(for: s)
+            return ScreenIdentityDescriptor(
+                index: idx,
+                baseKey: screenKey(for: s),
+                originX: Int(round(s.frame.origin.x)),
+                originY: Int(round(s.frame.origin.y)),
+                unitNumber: id.map { CGDisplayUnitNumber($0) } ?? 0,
+                displayID: id ?? 0
+            )
+        }
+        let resolved = Self.resolvePersistentScreenKeys(for: descriptors)
+        let targetID = displayID(for: screen)
+        let matchIdx = screens.firstIndex(where: { $0 === screen })
+            ?? screens.firstIndex(where: { s in
+                guard let t = targetID, let sid = displayID(for: s) else { return false }
+                return t == sid
+            })
+
+        guard let idx = matchIdx, idx < resolved.count else {
+            return (base, base, [base])
+        }
+        let siblings = zip(descriptors, resolved)
+            .filter { $0.0.baseKey == base }
+            .map { $0.1 }
+        return (resolved[idx], base, siblings)
     }
 
     /// Per-connection unique key used by runtime panel, hint, and auto-hide work item maps.
@@ -296,15 +386,18 @@ final class DockSettings {
         if current.isEmpty {
             return true
         }
-        let persistentKey = screenKey(for: screen)
-        if current.contains(persistentKey) {
+        let info = persistentScreenKeyInfo(for: screen)
+        if current.contains(info.effectiveKey) {
+            return false
+        }
+        if info.effectiveKey != info.baseKey && current.contains(info.baseKey) {
             return false
         }
         let legacyKey = legacyScreenKey(for: screen)
-        if legacyKey != persistentKey && current.contains(legacyKey) {
+        if legacyKey != info.effectiveKey && current.contains(legacyKey) {
             var migrated = current
             migrated.remove(legacyKey)
-            migrated.insert(persistentKey)
+            migrated.insert(info.effectiveKey)
             defaults.set(Array(migrated), forKey: Keys.disabledScreens)
             return false
         }
@@ -312,24 +405,36 @@ final class DockSettings {
     }
 
     func toggleScreen(_ screen: NSScreen) {
-        let persistentKey = screenKey(for: screen)
+        let info = persistentScreenKeyInfo(for: screen)
         let legacyKey = legacyScreenKey(for: screen)
         if isPrimaryDisplay(screen) && skipPrimaryDisplay {
             defaults.set(false, forKey: Keys.skipPrimaryDisplay)
             var current = disabledScreens
-            current.remove(persistentKey)
+            if info.effectiveKey != info.baseKey && current.contains(info.baseKey) {
+                current.remove(info.baseKey)
+                for sibling in info.siblingEffectiveKeys {
+                    current.insert(sibling)
+                }
+            }
+            current.remove(info.effectiveKey)
             current.remove(legacyKey)
             defaults.set(Array(current), forKey: Keys.disabledScreens)
             onChange?()
             return
         }
         var current = disabledScreens
-        let wasDisabled = current.contains(persistentKey) || current.contains(legacyKey)
+        if info.effectiveKey != info.baseKey && current.contains(info.baseKey) {
+            current.remove(info.baseKey)
+            for sibling in info.siblingEffectiveKeys {
+                current.insert(sibling)
+            }
+        }
+        let wasDisabled = current.contains(info.effectiveKey) || current.contains(legacyKey)
         current.remove(legacyKey)
         if wasDisabled {
-            current.remove(persistentKey)
+            current.remove(info.effectiveKey)
         } else {
-            current.insert(persistentKey)
+            current.insert(info.effectiveKey)
         }
         disabledScreens = current
     }

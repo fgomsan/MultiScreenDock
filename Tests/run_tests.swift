@@ -375,6 +375,66 @@ func testApplicationClickReopenAndHiddenSemantics() {
     expect(cmdClick == .revealInFinder(translocatedURL), "Command-click must reveal running bundle in Finder")
 }
 
+// 11. Identical twin monitors sharing the same EDID UUID must get independent persistent slot keys while unique UUIDs stay untouched
+func testTwinMonitorPersistentDisambiguation() {
+    let uniqueA = ScreenIdentityDescriptor(index: 0, baseKey: "uuid:1111-AAAA", originX: 0, originY: 0, unitNumber: 0, displayID: 1)
+    let twinRight = ScreenIdentityDescriptor(index: 1, baseKey: "uuid:2222-TWIN", originX: 2560, originY: 0, unitNumber: 2, displayID: 99)
+    let twinLeft = ScreenIdentityDescriptor(index: 2, baseKey: "uuid:2222-TWIN", originX: -2560, originY: 0, unitNumber: 1, displayID: 42)
+
+    let resolved = DockSettings.resolvePersistentScreenKeys(for: [uniqueA, twinRight, twinLeft])
+    expect(resolved.count == 3, "resolvePersistentScreenKeys must preserve descriptor count")
+    expect(resolved[0] == "uuid:1111-AAAA", "Unique UUID monitor must remain position-independent without @slot suffix")
+    expect(resolved[1] == "uuid:2222-TWIN@slot:2", "Right-hand twin monitor must resolve to @slot:2 regardless of enumeration order")
+    expect(resolved[2] == "uuid:2222-TWIN@slot:1", "Left-hand twin monitor must resolve to @slot:1 regardless of enumeration order")
+
+    // Reversed enumeration order after macOS reboot must still map the physical left/right arrangement slots identically
+    let rebootDescriptors = [
+        ScreenIdentityDescriptor(index: 0, baseKey: "uuid:2222-TWIN", originX: -2560, originY: 0, unitNumber: 5, displayID: 777),
+        ScreenIdentityDescriptor(index: 1, baseKey: "uuid:1111-AAAA", originX: 500, originY: 1440, unitNumber: 0, displayID: 1),
+        ScreenIdentityDescriptor(index: 2, baseKey: "uuid:2222-TWIN", originX: 2560, originY: 0, unitNumber: 4, displayID: 333)
+    ]
+    let rebootResolved = DockSettings.resolvePersistentScreenKeys(for: rebootDescriptors)
+    expect(rebootResolved[0] == "uuid:2222-TWIN@slot:1", "Left twin must keep @slot:1 across reboots and displayID changes")
+    expect(rebootResolved[1] == "uuid:1111-AAAA", "Moved unique monitor must still keep plain uuid:1111-AAAA")
+    expect(rebootResolved[2] == "uuid:2222-TWIN@slot:2", "Right twin must keep @slot:2 across reboots and displayID changes")
+}
+
+// 12. UpdateChecker semantic version comparison, feedback issue URL builder, and v1.3.5 L10n completeness
+func testUpdateCheckerAndFeedbackHelpers() {
+    defer { L10n.overrideLanguageForTesting = nil }
+
+    expect(UpdateChecker.isVersion("1.3.5", newerThan: "1.3.4"), "1.3.5 must be newer than 1.3.4")
+    expect(UpdateChecker.isVersion("v1.10.0", newerThan: "1.3.9"), "v1.10.0 must compare numerically > 1.3.9")
+    expect(UpdateChecker.isVersion("2.0", newerThan: "1.9.9"), "2.0 must be newer than 1.9.9")
+    expect(!UpdateChecker.isVersion("v1.3.5", newerThan: "1.3.5"), "Same version must NOT report an update")
+    expect(!UpdateChecker.isVersion("1.3.5.0", newerThan: "1.3.5"), "Trailing .0 must be treated as equal version")
+    expect(!UpdateChecker.isVersion("1.3.4", newerThan: "1.3.5"), "Older version must NOT report an update")
+    expect(!UpdateChecker.isVersion("1.3.5-beta.1", newerThan: "1.3.5"), "Prerelease must NOT be newer than matching stable")
+    expect(UpdateChecker.isVersion("1.3.5", newerThan: "1.3.5-rc.1"), "Stable must be newer than matching prerelease")
+
+    let issueURL = UpdateChecker.buildFeedbackIssueURL(
+        appVersion: "1.3.5",
+        osVersion: "Version 15.4 (Build 24E248)",
+        screenCount: 5,
+        mode: "autoHide"
+    )
+    expect(issueURL.host == "github.com", "Feedback URL must point to github.com")
+    expect(issueURL.path == "/fgomsan/MultiScreenDock/issues/new", "Feedback URL path must target /issues/new")
+    let query = issueURL.query ?? ""
+    expect(query.contains("1.3.5") && query.contains("autoHide"), "Feedback URL query must prefill version and mode")
+
+    for lang in AppLanguage.allCases where lang != .system {
+        L10n.overrideLanguageForTesting = lang
+        expect(!L10n.suggestImprovement.isEmpty, "suggestImprovement empty for \(lang)")
+        expect(!L10n.checkForUpdates.isEmpty, "checkForUpdates empty for \(lang)")
+        expect(!L10n.autoCheckUpdates.isEmpty, "autoCheckUpdates empty for \(lang)")
+        expect(L10n.updateAvailableMenu("1.4.0").contains("1.4.0"), "updateAvailableMenu missing version for \(lang)")
+        expect(L10n.updateAvailableTitle("1.4.0").contains("1.4.0"), "updateAvailableTitle missing version for \(lang)")
+        expect(!L10n.updateInstallAndRelaunchBtn.isEmpty, "updateInstallAndRelaunchBtn empty for \(lang)")
+        expect(!L10n.upToDateTitle.isEmpty, "upToDateTitle empty for \(lang)")
+    }
+}
+
 @main
 struct TestRunner {
     static func main() {
@@ -388,6 +448,8 @@ struct TestRunner {
         testSettingsBoundsValidationInIsolatedSuite()
         testLocalizationAndLanguageDetectionSideEffectFree()
         testApplicationClickReopenAndHiddenSemantics()
+        testTwinMonitorPersistentDisambiguation()
+        testUpdateCheckerAndFeedbackHelpers()
 
         print("MultiScreenDock Tests: \(passedTests) passed, \(failedTests) failed.")
         if failedTests > 0 {

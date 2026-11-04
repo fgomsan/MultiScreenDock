@@ -9,6 +9,7 @@ swiftc -O -parse-as-library \
     -framework Cocoa -framework QuartzCore -framework ColorSync -framework ServiceManagement \
     "${PROJECT_DIR}/Sources/L10n.swift" \
     "${PROJECT_DIR}/Sources/Settings.swift" \
+    "${PROJECT_DIR}/Sources/UpdateChecker.swift" \
     "${PROJECT_DIR}/Sources/Models.swift" \
     "${PROJECT_DIR}/Sources/DockPanelView.swift" \
     "${PROJECT_DIR}/Sources/MultiScreenController.swift" \

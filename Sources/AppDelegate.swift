@@ -24,6 +24,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         setupStatusItem()
+        UpdateChecker.shared.onUpdateStateChange = { [weak self] in
+            self?.refreshStatusItemIndicator()
+        }
+        UpdateChecker.shared.startAutomaticChecksIfEnabled()
         MultiScreenController.shared.start()
     }
 
@@ -39,13 +43,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             if let img = NSImage(systemSymbolName: "dock.rectangle", accessibilityDescription: "MultiScreenDock") {
                 img.isTemplate = true
                 button.image = img
+                button.imagePosition = .imageLeading
             } else {
                 button.title = "Dock+"
             }
             button.toolTip = L10n.tooltipStatus
         }
+        refreshStatusItemIndicator()
         statusMenu.delegate = self
         statusItem.menu = statusMenu
+    }
+
+    private func refreshStatusItemIndicator() {
+        guard let button = statusItem?.button else { return }
+        let hasUpdate = (UpdateChecker.shared.availableUpdate != nil)
+        if button.image != nil {
+            button.title = hasUpdate ? " •" : ""
+        } else {
+            button.title = hasUpdate ? "Dock+ •" : "Dock+"
+        }
     }
 
     // MARK: - Dynamic Menu Construction
@@ -57,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func populateSettingsMenu(_ menu: NSMenu, includeShortcuts: Bool = true) {
         menu.removeAllItems()
         statusItem?.button?.toolTip = L10n.tooltipStatus
+        refreshStatusItemIndicator()
         let settings = DockSettings.shared
         let counts = MultiScreenController.shared.statusCounts()
         let nativeAutohide = settings.isNativeDockAutohideEnabled
@@ -73,6 +90,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let header = NSMenuItem(title: headerTitle, action: nil, keyEquivalent: "")
         header.isEnabled = false
         menu.addItem(header)
+
+        if let available = UpdateChecker.shared.availableUpdate {
+            let updateBannerItem = NSMenuItem(
+                title: L10n.updateAvailableMenu(available.version),
+                action: #selector(showAvailableUpdate),
+                keyEquivalent: ""
+            )
+            updateBannerItem.target = self
+            menu.addItem(updateBannerItem)
+        }
+
         menu.addItem(.separator())
 
         // Visibility Mode Radio Group
@@ -281,7 +309,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         loginItem.state = loginStatus ? .on : .off
         menu.addItem(loginItem)
 
+        let checkUpdatesItem = NSMenuItem(title: L10n.checkForUpdates, action: #selector(checkUpdatesNow), keyEquivalent: "")
+        checkUpdatesItem.target = self
+        if let badge = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: nil) {
+            badge.isTemplate = true
+            checkUpdatesItem.image = badge
+        }
+        menu.addItem(checkUpdatesItem)
+
+        let autoUpdatesItem = NSMenuItem(title: L10n.autoCheckUpdates, action: #selector(toggleAutoCheckUpdates), keyEquivalent: "")
+        autoUpdatesItem.target = self
+        autoUpdatesItem.state = settings.autoCheckUpdates ? .on : .off
+        menu.addItem(autoUpdatesItem)
+
         menu.addItem(.separator())
+
+        let feedbackItem = NSMenuItem(title: L10n.suggestImprovement, action: #selector(openFeedbackPage), keyEquivalent: "")
+        feedbackItem.target = self
+        if let bulb = NSImage(systemSymbolName: "lightbulb", accessibilityDescription: nil) {
+            bulb.isTemplate = true
+            feedbackItem.image = bulb
+        }
+        menu.addItem(feedbackItem)
 
         let coffeeItem = NSMenuItem(title: L10n.buyMeACoffee, action: #selector(openBuyMeACoffee), keyEquivalent: "")
         coffeeItem.target = self
@@ -375,6 +424,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func openBuyMeACoffee() {
         NSWorkspace.shared.open(L10n.buyMeACoffeeURL)
+    }
+
+    @objc private func openFeedbackPage() {
+        UpdateChecker.shared.openFeedbackIssuePage()
+    }
+
+    @objc private func checkUpdatesNow() {
+        UpdateChecker.shared.checkNow(userInitiated: true)
+    }
+
+    @objc private func showAvailableUpdate() {
+        UpdateChecker.shared.presentAvailableUpdateOrCheck()
+    }
+
+    @objc private func toggleAutoCheckUpdates() {
+        DockSettings.shared.autoCheckUpdates.toggle()
+        if DockSettings.shared.autoCheckUpdates {
+            UpdateChecker.shared.startAutomaticChecksIfEnabled()
+        }
     }
 
     @objc private func quitApp() {

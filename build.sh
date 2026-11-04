@@ -139,9 +139,9 @@ cat > "${CONTENTS_DIR}/Info.plist" << 'EOF'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.3.4</string>
+    <string>1.3.5</string>
     <key>CFBundleVersion</key>
-    <string>8</string>
+    <string>9</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>
@@ -158,6 +158,7 @@ echo "3/3 Compiling Universal macOS binary (arm64 + x86_64)..."
 SOURCES=(
     "${PROJECT_DIR}/Sources/L10n.swift"
     "${PROJECT_DIR}/Sources/Settings.swift"
+    "${PROJECT_DIR}/Sources/UpdateChecker.swift"
     "${PROJECT_DIR}/Sources/Models.swift"
     "${PROJECT_DIR}/Sources/DockPanelView.swift"
     "${PROJECT_DIR}/Sources/MultiScreenController.swift"

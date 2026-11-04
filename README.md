@@ -43,7 +43,7 @@ brew install --cask multiscreendock
 
 ### Download a release
 
-1. Download [`MultiScreenDock-v1.3.4-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.3.4/MultiScreenDock-v1.3.4-macOS.zip) from the [latest release](https://github.com/fgomsan/MultiScreenDock/releases/latest).
+1. Download [`MultiScreenDock-v1.3.5-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.3.5/MultiScreenDock-v1.3.5-macOS.zip) from the [latest release](https://github.com/fgomsan/MultiScreenDock/releases/latest).
 2. Unzip it, move `MultiScreenDock.app` to `/Applications`, and open it.
 3. Official releases (`v1.3.2+`) are signed with an Apple **Developer ID Application** certificate (`G387RJ72S5`) and **notarized by Apple**, so macOS Gatekeeper opens them directly without warnings.
 
@@ -77,9 +77,11 @@ The menu-bar icon, a right-click on the bar, or **MultiScreenDock Settings** on 
 | Smooth hover magnification | Scale the icon under the pointer | On |
 | Show running unpinned apps | Append regular running apps that are not pinned | On |
 | Icon size | 28, 36, 44, or 52 pt | The system Dock's tile size, when that value is between 20 and 80 |
-| Active displays | Turn individual screens on or off (persisted by hardware display UUID) | All non-primary screens |
+| Active displays | Turn individual screens on or off (persisted by hardware UUID, with automatic slot disambiguation for identical twin monitors) | All non-primary screens |
 | Language | Automatic (macOS) or manual override (EN, ES, FR, DE, PT, IT, JA, ZH) | Automatic |
 | Launch at Login | Registers with `SMAppService.mainApp` (System Settings → Login Items) | Off |
+| Check for Updates | Manual check + subtle menu-bar update indicator & verified 1-click self-update | Automatic (every 24h) |
+| Suggest an Improvement | Opens a pre-filled GitHub Issue template from the menu | — |
 
 **Sync Dock Icons Now** (⌘R in the menu) re-reads the Dock plist immediately. Quit is ⌘Q in that menu.
 
@@ -177,7 +179,7 @@ brew tap fgomsan/tap
 brew install --cask multiscreendock
 ```
 
-O descarga [`MultiScreenDock-v1.3.4-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.3.4/MultiScreenDock-v1.3.4-macOS.zip), descomprímela, mueve `MultiScreenDock.app` a `/Applications` y ábrela directamente (firmada con Apple Developer ID y notarizada por Apple, sin avisos de Gatekeeper). Para compilar desde código fuente y ejecutar los tests: `./Tests/run_tests.sh && ./build.sh` en macOS 13 o posterior.
+O descarga [`MultiScreenDock-v1.3.5-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.3.5/MultiScreenDock-v1.3.5-macOS.zip), descomprímela, mueve `MultiScreenDock.app` a `/Applications` y ábrela directamente (firmada con Apple Developer ID y notarizada por Apple, sin avisos de Gatekeeper). Para compilar desde código fuente y ejecutar los tests: `./Tests/run_tests.sh && ./build.sh` en macOS 13 o posterior.
 
 **Permisos.** No pide Accesibilidad ni Grabación de Pantalla. macOS pedirá permiso de Automatización al controlar el Finder (clic en el icono de Finder, ventana nueva, vaciar la Papelera) o System Events (ocultar automáticamente el Dock del sistema). Si rechazas System Events, ofrece abrir Ajustes del Sistema o confirmar explícitamente el reinicio del Dock.
 

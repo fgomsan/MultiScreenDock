@@ -305,6 +305,76 @@ func testLocalizationAndLanguageDetectionSideEffectFree() {
     }
 }
 
+// 10. Regression test: Hidden (⌘H), minimized (⌘M), and closed-window (⌘W) running apps must route through LaunchServices reopen
+func testApplicationClickReopenAndHiddenSemantics() {
+    let plistURL = URL(fileURLWithPath: "/Applications/Safari.app")
+    let translocatedURL = URL(fileURLWithPath: "/private/var/folders/xx/AppTranslocation/ABC/d/Safari.app")
+
+    // Hidden running app clicked -> must unhide first AND reopen via LaunchServices
+    let hiddenClick = DockLayoutMath.planApplicationClick(
+        plistURL: plistURL,
+        runningBundleURL: nil,
+        isRunning: true,
+        isActive: false,
+        isHidden: true,
+        modifiers: []
+    )
+    expect(
+        hiddenClick == .reopenAndActivate(url: plistURL, unhideFirst: true, hidesOthers: false),
+        "Clicking a hidden running app must unhide first and reopen via LaunchServices"
+    )
+
+    // Running app with closed (⌘W) or minimized (⌘M) window -> must still reopen via LaunchServices (even if already active!)
+    let activeWindowlessClick = DockLayoutMath.planApplicationClick(
+        plistURL: plistURL,
+        runningBundleURL: translocatedURL,
+        isRunning: true,
+        isActive: true,
+        isHidden: false,
+        modifiers: []
+    )
+    expect(
+        activeWindowlessClick == .reopenAndActivate(url: translocatedURL, unhideFirst: false, hidesOthers: false),
+        "Clicking an already-running app must still dispatch reopenAndActivate (using runningBundleURL when present)"
+    )
+
+    // Option-click on visible frontmost app -> hides it
+    let optActiveClick = DockLayoutMath.planApplicationClick(
+        plistURL: plistURL,
+        runningBundleURL: nil,
+        isRunning: true,
+        isActive: true,
+        isHidden: false,
+        modifiers: [.option]
+    )
+    expect(optActiveClick == .hideRunningApp, "Option-clicking active visible app must hide it")
+
+    // Option-click on hidden app -> must NOT re-hide; must unhide, reopen, and hide others
+    let optHiddenClick = DockLayoutMath.planApplicationClick(
+        plistURL: plistURL,
+        runningBundleURL: nil,
+        isRunning: true,
+        isActive: true,
+        isHidden: true,
+        modifiers: [.option]
+    )
+    expect(
+        optHiddenClick == .reopenAndActivate(url: plistURL, unhideFirst: true, hidesOthers: true),
+        "Option-clicking a hidden app must unhide it and hide others"
+    )
+
+    // Command-click -> reveals in Finder
+    let cmdClick = DockLayoutMath.planApplicationClick(
+        plistURL: plistURL,
+        runningBundleURL: translocatedURL,
+        isRunning: true,
+        isActive: false,
+        isHidden: false,
+        modifiers: [.command]
+    )
+    expect(cmdClick == .revealInFinder(translocatedURL), "Command-click must reveal running bundle in Finder")
+}
+
 @main
 struct TestRunner {
     static func main() {
@@ -317,6 +387,7 @@ struct TestRunner {
         testStackedDisplayGeometryDetection()
         testSettingsBoundsValidationInIsolatedSuite()
         testLocalizationAndLanguageDetectionSideEffectFree()
+        testApplicationClickReopenAndHiddenSemantics()
 
         print("MultiScreenDock Tests: \(passedTests) passed, \(failedTests) failed.")
         if failedTests > 0 {

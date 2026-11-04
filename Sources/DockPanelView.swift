@@ -343,37 +343,50 @@ final class DockTileView: NSView {
 
         switch item.kind {
         case .finder:
-            openFinder()
+            openFinder(withModifiers: cleanMods)
 
         case .application(let bundleID, let url):
-            if cleanMods.contains(.command) {
-                NSWorkspace.shared.activateFileViewerSelecting([url])
-                return
-            }
-            if let running = DockModelReader.findRunningApplication(bundleID: bundleID, url: url) {
-                if running.isActive && cleanMods.contains(.option) {
-                    running.hide()
-                    return
+            let running = DockModelReader.findRunningApplication(bundleID: bundleID, url: url)
+            let action = DockLayoutMath.planApplicationClick(
+                plistURL: url,
+                runningBundleURL: running?.bundleURL,
+                isRunning: running != nil,
+                isActive: running?.isActive ?? false,
+                isHidden: running?.isHidden ?? false,
+                modifiers: cleanMods
+            )
+
+            switch action {
+            case .revealInFinder(let targetURL):
+                NSWorkspace.shared.activateFileViewerSelecting([targetURL])
+
+            case .hideRunningApp:
+                running?.hide()
+
+            case .reopenAndActivate(let targetURL, let unhideFirst, let hidesOthers):
+                if unhideFirst {
+                    running?.unhide()
                 }
-                if cleanMods.isEmpty || cleanMods == .option {
-                    let activated: Bool
-                    if #available(macOS 14.0, *) {
-                        activated = running.activate()
-                    } else {
-                        activated = running.activate(options: [.activateIgnoringOtherApps])
-                    }
-                    if activated {
-                        return
-                    }
-                }
-            }
-            let config = NSWorkspace.OpenConfiguration()
-            config.activates = true
-            NSWorkspace.shared.openApplication(at: url, configuration: config) { _, err in
-                if err != nil && !FileManager.default.fileExists(atPath: url.path) {
+                // Always route through LaunchServices (`openApplication`) with `createsNewApplicationInstance = false`
+                // rather than bare `NSRunningApplication.activate()`:
+                // 1) Sends `kAEReopenApplication` ('rapp') so apps that are running with closed (⌘W) or
+                //    minimized (⌘M) windows reopen/deminiaturize their window just like Apple's native Dock.
+                // 2) Grants full WindowServer foreground handoff from a `.nonactivatingPanel` LSUIElement on
+                //    macOS 14+, where cooperative `running.activate()` silently fails to unhide/foreground.
+                let config = NSWorkspace.OpenConfiguration()
+                config.activates = true
+                config.createsNewApplicationInstance = false
+                config.hidesOthers = hidesOthers
+                NSWorkspace.shared.openApplication(at: targetURL, configuration: config) { [weak running] _, err in
+                    guard err != nil else { return }
                     DispatchQueue.main.async {
-                        DockModelReader.shared.reloadPlistCache()
-                        MultiScreenController.shared.refreshAll(forceLayout: true)
+                        if let running = running, !running.isTerminated {
+                            running.unhide()
+                            _ = running.activate(options: [.activateAllWindows])
+                        } else if !FileManager.default.fileExists(atPath: url.path) {
+                            DockModelReader.shared.reloadPlistCache()
+                            MultiScreenController.shared.refreshAll(forceLayout: true)
+                        }
                     }
                 }
             }
@@ -382,7 +395,9 @@ final class DockTileView: NSView {
             if cleanMods.contains(.command) {
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             } else {
-                NSWorkspace.shared.open(url)
+                let config = NSWorkspace.OpenConfiguration()
+                config.activates = true
+                NSWorkspace.shared.open(url, configuration: config, completionHandler: nil)
             }
 
         case .trash:
@@ -393,29 +408,28 @@ final class DockTileView: NSView {
         }
     }
 
-    private func openFinder() {
-        let script = """
-        tell application "Finder"
-            activate
-            if (count of windows) is 0 then
-                make new Finder window to home
-            end if
-        end tell
-        """
-        if let ascript = NSAppleScript(source: script) {
-            var err: NSDictionary?
-            ascript.executeAndReturnError(&err)
-            if err == nil { return }
+    private func openFinder(withModifiers cleanMods: NSEvent.ModifierFlags = []) {
+        let finderApp = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first
+        if let finderApp = finderApp, finderApp.isActive && !finderApp.isHidden && cleanMods.contains(.option) {
+            finderApp.hide()
+            return
+        }
+        if finderApp?.isHidden == true {
+            finderApp?.unhide()
         }
         let finderURL = URL(fileURLWithPath: "/System/Library/CoreServices/Finder.app")
         let config = NSWorkspace.OpenConfiguration()
         config.activates = true
+        config.createsNewApplicationInstance = false
+        config.hidesOthers = cleanMods.contains(.option)
         NSWorkspace.shared.openApplication(at: finderURL, configuration: config, completionHandler: nil)
     }
 
     private func openTrash() {
         if let trashURL = FileManager.default.urls(for: .trashDirectory, in: .userDomainMask).first {
-            NSWorkspace.shared.open(trashURL)
+            let config = NSWorkspace.OpenConfiguration()
+            config.activates = true
+            NSWorkspace.shared.open(trashURL, configuration: config, completionHandler: nil)
         }
     }
 
@@ -511,7 +525,14 @@ final class DockTileView: NSView {
         guard let app = sender.representedObject as? NSRunningApplication else { return }
         if app.isHidden {
             app.unhide()
-            app.activate()
+            if let appURL = app.bundleURL {
+                let config = NSWorkspace.OpenConfiguration()
+                config.activates = true
+                config.createsNewApplicationInstance = false
+                NSWorkspace.shared.openApplication(at: appURL, configuration: config, completionHandler: nil)
+            } else {
+                _ = app.activate(options: [.activateAllWindows])
+            }
         } else {
             app.hide()
         }
@@ -783,6 +804,38 @@ enum DockLayoutMath {
             }
         }
         return false
+    }
+
+    enum ApplicationClickAction: Equatable {
+        case revealInFinder(URL)
+        case hideRunningApp
+        case reopenAndActivate(url: URL, unhideFirst: Bool, hidesOthers: Bool)
+    }
+
+    /// Plans how clicking an application tile should dispatch to Finder / NSRunningApplication / LaunchServices
+    /// so hidden (`⌘H`), minimized (`⌘M`), and closed-window (`⌘W`) running apps always reopen and foreground
+    /// identically to Apple's native macOS Dock.
+    static func planApplicationClick(
+        plistURL: URL,
+        runningBundleURL: URL?,
+        isRunning: Bool,
+        isActive: Bool,
+        isHidden: Bool,
+        modifiers: NSEvent.ModifierFlags
+    ) -> ApplicationClickAction {
+        let resolvedURL = runningBundleURL ?? plistURL
+        if modifiers.contains(.command) {
+            return .revealInFinder(resolvedURL)
+        }
+        let optionHeld = modifiers.contains(.option)
+        if isRunning && isActive && !isHidden && optionHeld {
+            return .hideRunningApp
+        }
+        return .reopenAndActivate(
+            url: resolvedURL,
+            unhideFirst: isRunning && isHidden,
+            hidesOthers: optionHeld
+        )
     }
 
     static func hasMonitorDirectlyAbove(targetFrame: NSRect, among screenFrames: [NSRect]) -> Bool {

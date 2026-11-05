@@ -1095,4 +1095,122 @@ enum L10n {
             zh: "正在打开官方 GitHub Releases 页面以便直接下载（或通过 Homebrew 更新）。"
         )
     }
+
+    // MARK: - Folder Stacks (v1.4.0)
+    static var openFolderStack: String {
+        tr(
+            en: "Open Stack",
+            es: "Desplegar carpeta",
+            fr: "Ouvrir la pile",
+            de: "Stapel öffnen",
+            pt: "Abrir Pilha",
+            it: "Apri pila",
+            ja: "スタックを開く",
+            zh: "展开叠放"
+        )
+    }
+
+    static var stackEmptyFolder: String {
+        tr(
+            en: "Folder is empty",
+            es: "La carpeta está vacía",
+            fr: "Le dossier est vide",
+            de: "Ordner ist leer",
+            pt: "A pasta está vazia",
+            it: "La cartella è vuota",
+            ja: "フォルダは空です",
+            zh: "文件夹为空"
+        )
+    }
+
+    static func stackMoreInFinder(_ count: Int) -> String {
+        tr(
+            en: "\(count) More in Finder…",
+            es: "\(count) más en el Finder…",
+            fr: "\(count) de plus dans le Finder…",
+            de: "\(count) weitere im Finder…",
+            pt: "Mais \(count) no Finder…",
+            it: "Altri \(count) nel Finder…",
+            ja: "さらに\(count)項目をFinderで表示…",
+            zh: "在访达中显示另外 \(count) 项…"
+        )
+    }
+
+    static var stackBackBtn: String {
+        tr(
+            en: "Back",
+            es: "Atrás",
+            fr: "Retour",
+            de: "Zurück",
+            pt: "Voltar",
+            it: "Indietro",
+            ja: "戻る",
+            zh: "返回"
+        )
+    }
+
+    static var stackStyleMenu: String {
+        tr(
+            en: "Folder Stack View",
+            es: "Vista al desplegar carpetas",
+            fr: "Affichage des piles de dossiers",
+            de: "Ordnerstapel-Ansicht",
+            pt: "Visualização de Pilhas",
+            it: "Vista pile cartelle",
+            ja: "フォルダスタックの表示形式",
+            zh: "文件夹叠放视图"
+        )
+    }
+
+    static var stackStyleDockDefault: String {
+        tr(
+            en: "Match macOS Dock (Default)",
+            es: "Igual que el Dock de macOS (Por defecto)",
+            fr: "Identique au Dock macOS (Par défaut)",
+            de: "Wie macOS-Dock (Standard)",
+            pt: "Igual ao Dock do macOS (Padrão)",
+            it: "Come il Dock di macOS (Predefinito)",
+            ja: "macOSのDockに合わせる（デフォルト）",
+            zh: "跟随 macOS 程序坞（默认）"
+        )
+    }
+
+    static var stackStyleFan: String {
+        tr(
+            en: "Fan",
+            es: "Abanico",
+            fr: "Éventail",
+            de: "Fächer",
+            pt: "Leque",
+            it: "Ventaglio",
+            ja: "ファン",
+            zh: "扇形"
+        )
+    }
+
+    static var stackStyleGrid: String {
+        tr(
+            en: "Grid",
+            es: "Cuadrícula",
+            fr: "Grille",
+            de: "Gitter",
+            pt: "Grade",
+            it: "Griglia",
+            ja: "グリッド",
+            zh: "网格"
+        )
+    }
+
+    static var stackStyleList: String {
+        tr(
+            en: "List",
+            es: "Lista",
+            fr: "Liste",
+            de: "Liste",
+            pt: "Lista",
+            it: "Elenco",
+            ja: "リスト",
+            zh: "列表"
+        )
+    }
 }

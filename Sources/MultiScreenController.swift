@@ -230,7 +230,7 @@ final class MultiScreenController {
                 let inTrigger = panel.triggerZone(on: screen, hasScreenBelow: plan.hasBelow).contains(mousePos)
 
                 if panel.isRevealed {
-                    if !inKeepAlive && !panel.isContextMenuOpen {
+                    if !inKeepAlive && !panel.hasActivePopup {
                         scheduleHideIfNeeded(for: key, screen: screen, panel: panel)
                     }
                 } else if inTrigger {
@@ -257,6 +257,11 @@ final class MultiScreenController {
 
     // MARK: - Real-Time Auto-Hide State Machine
 
+    func evaluateAutoHideNow() {
+        guard DockSettings.shared.visibilityMode == .autoHide else { return }
+        evaluateAutoHideState(at: NSEvent.mouseLocation)
+    }
+
     private func evaluateAutoHideState(at mousePos: NSPoint) {
         guard !cachedAutoHideScreens.isEmpty else { return }
 
@@ -269,7 +274,7 @@ final class MultiScreenController {
                 revealWorkItems[key]?.cancel()
                 revealWorkItems.removeValue(forKey: key)
 
-                let insideKeepAlive = panel.keepAliveZone(on: screen).contains(mousePos) || panel.isContextMenuOpen
+                let insideKeepAlive = panel.keepAliveZone(on: screen).contains(mousePos) || panel.hasActivePopup
                 if insideKeepAlive {
                     if let pendingHide = hideWorkItems[key] {
                         pendingHide.cancel()
@@ -330,7 +335,7 @@ final class MultiScreenController {
             guard DockSettings.shared.visibilityMode == .autoHide else { return }
 
             let currentMouse = NSEvent.mouseLocation
-            if panel.keepAliveZone(on: screen).contains(currentMouse) || panel.isContextMenuOpen {
+            if panel.keepAliveZone(on: screen).contains(currentMouse) || panel.hasActivePopup {
                 return
             }
 

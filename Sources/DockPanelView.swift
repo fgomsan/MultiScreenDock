@@ -257,6 +257,7 @@ final class DockTileView: NSView {
         if DockSettings.shared.hoverMagnification {
             animateHover(hovered: true)
         }
+        guard !FolderStackController.shared.isVisible else { return }
         let rectInWin = convert(imageView.frame, to: nil)
         let screenRect = barPanel.convertToScreen(rectInWin)
         HoverBubbleController.shared.show(text: item.label, above: screenRect, on: barPanel.screen)
@@ -320,6 +321,18 @@ final class DockTileView: NSView {
             rightMouseDown(with: event)
             return
         }
+        if FolderStackController.shared.isVisible {
+            let barPanel = window as? DockBarPanel
+            let isSameFolderTile: Bool
+            if case .directoryOrFile(let url, let isDir, _) = item.kind, isDir {
+                isSameFolderTile = FolderStackController.shared.isPresented(for: url, on: barPanel)
+            } else {
+                isSameFolderTile = false
+            }
+            if !isSameFolderTile {
+                FolderStackController.shared.dismiss(animated: false)
+            }
+        }
         animateClickBounce()
         HoverBubbleController.shared.hide()
         activateItem(withModifiers: event.modifierFlags)
@@ -327,6 +340,7 @@ final class DockTileView: NSView {
 
     override func rightMouseDown(with event: NSEvent) {
         HoverBubbleController.shared.hide()
+        FolderStackController.shared.dismiss(animated: false)
         let barPanel = window as? DockBarPanel
         barPanel?.isContextMenuOpen = true
         defer { barPanel?.isContextMenuOpen = false }
@@ -391,9 +405,11 @@ final class DockTileView: NSView {
                 }
             }
 
-        case .directoryOrFile(let url, _):
+        case .directoryOrFile(let url, let isDir, let stackCfg):
             if cleanMods.contains(.command) {
                 NSWorkspace.shared.activateFileViewerSelecting([url])
+            } else if isDir && !cleanMods.contains(.option) {
+                presentFolderStack(url: url, stackConfig: stackCfg)
             } else {
                 let config = NSWorkspace.OpenConfiguration()
                 config.activates = true
@@ -468,16 +484,50 @@ final class DockTileView: NSView {
                 menu.addItem(quitItem)
             }
 
-        case .directoryOrFile(let url, let isDir):
-            let openTitle = isDir ? L10n.openInFinder : L10n.openGeneric
-            let openItem = NSMenuItem(title: openTitle, action: #selector(ctxOpenPrimary), keyEquivalent: "")
-            openItem.target = self
-            menu.addItem(openItem)
+        case .directoryOrFile(let url, let isDir, _):
+            if isDir {
+                let stackItem = NSMenuItem(title: L10n.openFolderStack, action: #selector(ctxOpenFolderStack), keyEquivalent: "")
+                stackItem.target = self
+                menu.addItem(stackItem)
 
-            let reveal = NSMenuItem(title: L10n.showContainerInFinder, action: #selector(ctxRevealInFinder), keyEquivalent: "")
-            reveal.representedObject = url
-            reveal.target = self
-            menu.addItem(reveal)
+                let openFinderItem = NSMenuItem(title: L10n.openInFinder, action: #selector(ctxOpenDirectoryInFinder(_:)), keyEquivalent: "")
+                openFinderItem.representedObject = url
+                openFinderItem.target = self
+                menu.addItem(openFinderItem)
+
+                let reveal = NSMenuItem(title: L10n.showContainerInFinder, action: #selector(ctxRevealInFinder), keyEquivalent: "")
+                reveal.representedObject = url
+                reveal.target = self
+                menu.addItem(reveal)
+
+                menu.addItem(.separator())
+                let styleSubmenu = NSMenu()
+                let styleChoices: [(String, FolderStackStylePreference)] = [
+                    (L10n.stackStyleDockDefault, .dockDefault),
+                    (L10n.stackStyleFan, .fan),
+                    (L10n.stackStyleGrid, .grid),
+                    (L10n.stackStyleList, .list)
+                ]
+                for (title, pref) in styleChoices {
+                    let sItem = NSMenuItem(title: title, action: #selector(ctxSelectFolderStackStyle(_:)), keyEquivalent: "")
+                    sItem.target = self
+                    sItem.representedObject = pref.rawValue
+                    sItem.state = (DockSettings.shared.folderStackStyle == pref) ? .on : .off
+                    styleSubmenu.addItem(sItem)
+                }
+                let styleParent = NSMenuItem(title: L10n.stackStyleMenu, action: nil, keyEquivalent: "")
+                styleParent.submenu = styleSubmenu
+                menu.addItem(styleParent)
+            } else {
+                let openItem = NSMenuItem(title: L10n.openGeneric, action: #selector(ctxOpenPrimary), keyEquivalent: "")
+                openItem.target = self
+                menu.addItem(openItem)
+
+                let reveal = NSMenuItem(title: L10n.showContainerInFinder, action: #selector(ctxRevealInFinder), keyEquivalent: "")
+                reveal.representedObject = url
+                reveal.target = self
+                menu.addItem(reveal)
+            }
 
         case .trash(let isFull):
             let openItem = NSMenuItem(title: L10n.openTrash, action: #selector(ctxOpenPrimary), keyEquivalent: "")
@@ -503,8 +553,44 @@ final class DockTileView: NSView {
         return menu
     }
 
+    private func presentFolderStack(url: URL, stackConfig: DockFolderStackConfig?) {
+        guard let barPanel = window as? DockBarPanel else {
+            FolderStackController.shared.openInFinder(url)
+            return
+        }
+        let rectInWin = convert(bounds, to: nil)
+        let anchorScreenRect = barPanel.convertToScreen(rectInWin)
+        FolderStackController.shared.toggleOrPresent(
+            folderURL: url,
+            title: item.label,
+            dockConfig: stackConfig,
+            anchorScreenRect: anchorScreenRect,
+            on: barPanel.screen,
+            barPanel: barPanel
+        )
+    }
+
     @objc private func ctxOpenPrimary() {
         activateItem(withModifiers: [])
+    }
+
+    @objc private func ctxOpenFolderStack() {
+        if case .directoryOrFile(let url, let isDir, let stackCfg) = item.kind, isDir {
+            presentFolderStack(url: url, stackConfig: stackCfg)
+        }
+    }
+
+    @objc private func ctxOpenDirectoryInFinder(_ sender: NSMenuItem) {
+        if let url = sender.representedObject as? URL {
+            FolderStackController.shared.openInFinder(url)
+        }
+    }
+
+    @objc private func ctxSelectFolderStackStyle(_ sender: NSMenuItem) {
+        if let raw = sender.representedObject as? String,
+           let pref = FolderStackStylePreference(rawValue: raw) {
+            DockSettings.shared.folderStackStyle = pref
+        }
     }
 
     @objc private func ctxNewFinderWindow() {
@@ -571,7 +657,7 @@ final class DockTileView: NSView {
             guard !mask.isEmpty else { return [] }
             animateHover(hovered: true)
             return .generic
-        case .directoryOrFile(_, let isDir) where isDir:
+        case .directoryOrFile(_, let isDir, _) where isDir:
             if mask.contains(.move) {
                 animateHover(hovered: true)
                 return .move
@@ -610,7 +696,7 @@ final class DockTileView: NSView {
             }
             return true
 
-        case .directoryOrFile(let folderURL, let isDir) where isDir:
+        case .directoryOrFile(let folderURL, let isDir, _) where isDir:
             let folderStd = folderURL.standardizedFileURL
             let actionable = urls.filter { fileURL in
                 let srcStd = fileURL.standardizedFileURL
@@ -785,7 +871,7 @@ enum DockLayoutMath {
                 return "finder|\(item.id)|\(item.label)"
             case .application(let bid, let url):
                 return "app|\(item.id)|\(item.label)|\(bid ?? "")|\(url.path)"
-            case .directoryOrFile(let url, let isDir):
+            case .directoryOrFile(let url, let isDir, _):
                 return "item|\(item.id)|\(item.label)|\(url.path)|\(isDir)"
             case .separator:
                 return "sep|\(item.id)"
@@ -876,6 +962,8 @@ final class ClippedPassthroughRootView: NSView {
 
 final class DockBarPanel: NSPanel {
     var isContextMenuOpen = false
+    var isFolderStackOpen = false
+    var hasActivePopup: Bool { isContextMenuOpen || isFolderStackOpen }
     private(set) var isRevealed = false
     private var animationToken: Int = 0
 
@@ -1052,6 +1140,9 @@ final class DockBarPanel: NSPanel {
     }
 
     func conceal(animated: Bool, onConcealed: (() -> Void)? = nil) {
+        if isFolderStackOpen {
+            FolderStackController.shared.dismiss(animated: false)
+        }
         guard isRevealed || isVisible else {
             onConcealed?()
             return

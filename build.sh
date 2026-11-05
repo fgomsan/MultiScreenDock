@@ -139,9 +139,9 @@ cat > "${CONTENTS_DIR}/Info.plist" << 'EOF'
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.3.5</string>
+    <string>1.4.0</string>
     <key>CFBundleVersion</key>
-    <string>9</string>
+    <string>10</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>
@@ -160,13 +160,14 @@ SOURCES=(
     "${PROJECT_DIR}/Sources/Settings.swift"
     "${PROJECT_DIR}/Sources/UpdateChecker.swift"
     "${PROJECT_DIR}/Sources/Models.swift"
+    "${PROJECT_DIR}/Sources/FolderStackPanel.swift"
     "${PROJECT_DIR}/Sources/DockPanelView.swift"
     "${PROJECT_DIR}/Sources/MultiScreenController.swift"
     "${PROJECT_DIR}/Sources/AppDelegate.swift"
     "${PROJECT_DIR}/Sources/main.swift"
 )
 
-FRAMEWORKS=(-framework Cocoa -framework QuartzCore -framework ColorSync -framework ServiceManagement)
+FRAMEWORKS=(-framework Cocoa -framework QuartzCore -framework ColorSync -framework ServiceManagement -framework QuickLookThumbnailing)
 
 swiftc -O -target arm64-apple-macos13.0 "${FRAMEWORKS[@]}" "${SOURCES[@]}" -o "${BUILD_TMP}/${APP_NAME}-arm64"
 swiftc -O -target x86_64-apple-macos13.0 -Xlinker -w "${FRAMEWORKS[@]}" "${SOURCES[@]}" -o "${BUILD_TMP}/${APP_NAME}-x86_64"

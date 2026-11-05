@@ -550,6 +550,89 @@ func testFolderStackSortStyleGeometryAndDirectoryReader() {
     }
 }
 
+// 14. Continuous 120 Hz raised-cosine magnification wave, neighbor falloff, focal-point lock & gap-free label tracking
+func testContinuousCosineWaveMagnificationAndFocalLock() {
+    // 8 tiles + 1 separator + 2 tiles = 11 slots
+    var slots: [DockLayoutMath.WaveSlotInput] = Array(repeating: .init(isSeparator: false), count: 8)
+    slots.append(.init(isSeparator: true))
+    slots.append(.init(isSeparator: false))
+    slots.append(.init(isSeparator: false))
+
+    let mockItems: [DockItem] = slots.enumerated().map { idx, s in
+        DockItem(
+            id: "w-\(idx)",
+            label: "Item \(idx)",
+            kind: s.isSeparator ? .separator : .finder,
+            icon: NSImage(),
+            isRunning: false,
+            isFrontmost: false
+        )
+    }
+
+    let baseIcon: CGFloat = 36
+    let expectedBarSz = DockLayoutMath.barSize(for: mockItems, iconSize: baseIcon)
+    let containerW = expectedBarSz.width + 116 // +58 headroom per side
+
+    // 14a. Rest layout (cursor = nil, envelope = 0) matches barSize exactly
+    let rest = DockLayoutMath.computeWaveLayout(
+        slots: slots,
+        baseIconSize: baseIcon,
+        containerWidth: containerW,
+        cursorXInContainer: nil,
+        envelope: 0.0
+    )
+    expect(abs(rest.barWidth - expectedBarSz.width) < 0.01, "Rest wave barWidth must match DockLayoutMath.barSize")
+    expect(rest.hoveredSlotIndex == nil, "Rest wave without cursor must have nil hoveredSlotIndex")
+
+    // 14b. Hovering center of tile #4 creates smooth symmetric cosine bell curve across neighbors #3, #2 and #5, #6
+    let tile4RestCenter = rest.barOriginXInContainer + rest.slots[4].tileOriginX + rest.slots[4].slotWidth * 0.5
+    let midWave = DockLayoutMath.computeWaveLayout(
+        slots: slots,
+        baseIconSize: baseIcon,
+        containerWidth: containerW,
+        cursorXInContainer: tile4RestCenter,
+        envelope: 1.0
+    )
+    expect(midWave.hoveredSlotIndex == 4, "Hovering tile 4 center must report hoveredSlotIndex == 4")
+    expect(midWave.barWidth > rest.barWidth + 24, "Magnified wave must smoothly expand total pill width")
+    expect(midWave.slots[4].iconSize > midWave.slots[3].iconSize, "Center icon must be larger than ±1 neighbor")
+    expect(midWave.slots[3].iconSize > midWave.slots[2].iconSize, "±1 neighbor must be larger than ±2 neighbor")
+    expect(midWave.slots[2].iconSize > baseIcon, "±2 neighbor must still participate gently in cosine wave")
+    expect(abs(midWave.slots[0].iconSize - baseIcon) < 0.01, "Distant icon #0 must remain at baseIconSize")
+
+    // 14c. Focal-point lock: hovering leftmost (#0), middle (#4), or rightmost (#10) tile keeps that tile's center locked under cursor!
+    for targetIdx in [0, 4, 10] {
+        let targetRestCenter = rest.barOriginXInContainer + rest.slots[targetIdx].tileOriginX + rest.slots[targetIdx].slotWidth * 0.5
+        let w = DockLayoutMath.computeWaveLayout(
+            slots: slots,
+            baseIconSize: baseIcon,
+            containerWidth: containerW,
+            cursorXInContainer: targetRestCenter,
+            envelope: 1.0
+        )
+        let renderedCenter = w.barOriginXInContainer + w.slots[targetIdx].tileOriginX + w.slots[targetIdx].slotWidth * 0.5
+        expect(
+            abs(renderedCenter - targetRestCenter) < 0.5,
+            "Focal-point lock failed at slot \(targetIdx): cursor=\(targetRestCenter), renderedCenter=\(renderedCenter)"
+        )
+        expect(w.hoveredSlotIndex == targetIdx, "hoveredSlotIndex must stay locked on slot \(targetIdx)")
+    }
+
+    // 14d. Sweeping pixel-by-pixel across tiles 1..3 never drops hoveredSlotIndex to nil in the 2 pt inter-tile gap
+    let startSweepX = Int(ceil(rest.barOriginXInContainer + rest.slots[1].tileOriginX + 4))
+    let endSweepX = Int(floor(rest.barOriginXInContainer + rest.slots[3].tileOriginX + rest.slots[3].slotWidth - 4))
+    for px in startSweepX...endSweepX {
+        let w = DockLayoutMath.computeWaveLayout(
+            slots: slots,
+            baseIconSize: baseIcon,
+            containerWidth: containerW,
+            cursorXInContainer: CGFloat(px),
+            envelope: 1.0
+        )
+        expect(w.hoveredSlotIndex != nil, "Sweeping at x=\(px) between adjacent tiles must not flicker hoveredSlotIndex to nil")
+    }
+}
+
 @main
 struct TestRunner {
     static func main() {
@@ -566,6 +649,7 @@ struct TestRunner {
         testTwinMonitorPersistentDisambiguation()
         testUpdateCheckerAndFeedbackHelpers()
         testFolderStackSortStyleGeometryAndDirectoryReader()
+        testContinuousCosineWaveMagnificationAndFocalLock()
 
         print("MultiScreenDock Tests: \(passedTests) passed, \(failedTests) failed.")
         if failedTests > 0 {

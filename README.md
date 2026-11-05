@@ -20,8 +20,8 @@
 - **The same items as your Dock.** Finder, pinned apps, running apps that are not pinned (with a dot, brighter for the frontmost app), pinned files and folders, and the Trash. Spacers in `com.apple.dock.plist` are skipped. Icons refresh from that plist, from `NSWorkspace` launch/quit/activate notifications, and from **Sync Dock Icons Now**.
 - **Stays out of the system Dock's way.** The primary display is skipped by default. On any display where the system Dock is currently taking bottom space, the extra bar hides while **Avoid overlapping where native Dock is visible** is on.
 - **Settings where your hand already is.** Right-click the bar, Control-click it, or open **MultiScreenDock Settings** at the bottom of an icon's menu. The same menu is on the menu-bar icon (`dock.rectangle`, or the title "Dock+" if that symbol is missing). Per-display toggles, icon size (28 / 36 / 44 / 52 pt, scaled down to fit a narrow screen, floor 20 pt or 14 pt in extreme overflow), hover magnification, and launch at login live there.
-- **Clicks that match the Dock closely enough to use.** Click launches or activates. Command-click reveals an app, file, or folder in Finder. Option-click hides an app when that app is already frontmost. Right-click can open, show in Finder, hide, quit, open a Finder window, or empty the Trash (with confirmation). Drop files on an app to open them with it, on a folder to move them into it (or copy on Option-drag / across volumes), or on the Trash to trash them.
-- **A panel that does not take focus.** The bar is a non-activating `NSPanel`. Hovering it leaves the current app active. The label under the pointer is the item name. Hover magnification scales that one icon to 1.18×.
+- **Clicks that match the Dock closely enough to use.** Click launches or activates. Clicking a pinned folder (`Downloads`, `Documents`, etc.) opens a native **Folder Stack** (**Fan**, **Grid**, or **List** matching your macOS Dock setting, with QuickLook thumbnails, subfolder drill-down, and drag-out); Option-click opens the folder in Finder. Command-click reveals an app, file, or folder in Finder. Option-click hides an app when that app is already frontmost. Right-click can open, show in Finder, hide, quit, switch folder stack style, open a Finder window, or empty the Trash (with confirmation). Drop files on an app to open them with it, on a folder to move them into it (or copy on Option-drag / across volumes), or on the Trash to trash them.
+- **A panel that does not take focus.** The bar is a non-activating `NSPanel`. Hovering it leaves the current app active. The label glides smoothly above the hovered icon, and hover magnification renders a zero-latency 120 Hz raised-cosine wave across neighboring icons (up to 1.42×) with focal-point locking so the icon under your pointer never drifts sideways.
 - **8 languages built in** (English, Español, Français, Deutsch, Português, Italiano, 日本語, and 简体中文), detected automatically from macOS or switched manually at any time from the **Language** submenu.
 
 ## Requirements
@@ -74,7 +74,8 @@ The menu-bar icon, a right-click on the bar, or **MultiScreenDock Settings** on 
 | Auto-hide Apple's native Dock | Asks System Events to toggle the system Dock's auto-hide | Off |
 | Avoid overlapping the native Dock | Hide the extra bar on a display whose bottom `visibleFrame` is inset | On |
 | Allow on full-screen apps | Join full-screen spaces (`fullScreenAuxiliary`) | On |
-| Smooth hover magnification | Scale the icon under the pointer | On |
+| Smooth hover magnification | Continuous 120 Hz raised-cosine wave across neighboring icons | On |
+| Folder stacks style | Follow macOS Dock (`Fan` / `Grid` / `List`), or override globally | macOS Dock default |
 | Show running unpinned apps | Append regular running apps that are not pinned | On |
 | Icon size | 28, 36, 44, or 52 pt | The system Dock's tile size, when that value is between 20 and 80 |
 | Active displays | Turn individual screens on or off (persisted by hardware UUID, with automatic slot disambiguation for identical twin monitors) | All non-primary screens |
@@ -87,7 +88,7 @@ The menu-bar icon, a right-click on the bar, or **MultiScreenDock Settings** on 
 
 Click behavior:
 
-- **Click** a pinned or running app to launch or activate it. Click Finder to activate Finder, opening a window at your home folder only when Finder has no windows. Click a file or folder to open it. Click the Trash to open it.
+- **Click** a pinned or running app to launch or activate it. Click Finder to activate Finder, opening a window at your home folder only when Finder has no windows. Click a pinned folder to open its **Folder Stack** (**Fan**, **Grid**, or **List**), or **Option-click** it to open in Finder. Click a file or the Trash to open it.
 - **Command-click** an app, file, or folder to reveal it in Finder. Finder and the Trash ignore the modifier and perform their normal click.
 - **Option-click** an app that is already frontmost to hide it. Otherwise the click activates the app.
 - **Right-click** an item for Open/Show, Show in Finder, Hide, Quit, New Finder Window, or Empty Trash. The Trash's Empty item is enabled only when the Trash is not empty.
@@ -135,7 +136,7 @@ brew uninstall --cask --zap multiscreendock
 ## Limitations
 
 - The bar is always centered on the **bottom** edge. A system Dock pinned to the left or right edge is not mirrored, and overlap detection only looks at the bottom `visibleFrame` inset.
-- This is a separate panel, not Apple's Dock process. There is no bounce, no notification badge, no download progress, no folder stack or fan (a folder opens in Finder), no web URL tiles (`url-tile`), and no Dock spacers. Hover magnification scales the single icon under the pointer; it is not the system Dock's magnification curve.
+- This is a separate panel, not Apple's Dock process. There is no multi-bounce launch animation, no notification badge count, no inline Safari/App Store download progress bar, no web URL tiles (`url-tile`), and no Dock spacers.
 - Dropping files on a folder **moves** them on the same volume (`FileManager.moveItem`) and **copies** them when Option-dragging or dropping across volumes (`FileManager.copyItem`). If a destination name collision or permission error occurs, the source file stays intact and an alert reports which items failed.
 - **Upper** / **Lower** in the displays menu and the stacked-display dwell both derive from actual vertical display adjacency (`hasMonitorDirectlyBelow` / `hasMonitorDirectlyAbove`).
 - The full-screen setting adds `fullScreenAuxiliary` at Dock window level. Some exclusive full-screen windows still cover the bar.
@@ -183,11 +184,11 @@ O descarga [`MultiScreenDock-v1.3.5-macOS.zip`](https://github.com/fgomsan/Multi
 
 **Permisos.** No pide Accesibilidad ni Grabación de Pantalla. macOS pedirá permiso de Automatización al controlar el Finder (clic en el icono de Finder, ventana nueva, vaciar la Papelera) o System Events (ocultar automáticamente el Dock del sistema). Si rechazas System Events, ofrece abrir Ajustes del Sistema o confirmar explícitamente el reinicio del Dock.
 
-**Uso.** Clic derecho sobre la barra, o el icono `dock.rectangle` en la barra de menús. Clic abre o activa. ⌘-clic muestra el ítem en el Finder (salvo Finder y la Papelera). ⌥-clic oculta la app si ya está delante. Arrastrar archivos a una carpeta los mueve dentro (o los copia con ⌥-arrastrar o entre volúmenes distintos).
+**Uso.** Clic derecho sobre la barra, o el icono `dock.rectangle` en la barra de menús. Clic abre o activa (y en carpetas fijadas como `Descargas` despliega la **pila nativa** en **Abanico**, **Cuadrícula** o **Lista** con miniaturas QuickLook; ⌥-clic abre la carpeta en el Finder). ⌘-clic muestra el ítem en el Finder (salvo Finder y la Papelera). ⌥-clic oculta la app si ya está delante. Arrastrar archivos a una carpeta los mueve dentro (o los copia con ⌥-arrastrar o entre volúmenes distintos).
 
 **Desinstalar.** Desactiva **Abrir automáticamente al iniciar sesión** en el menú (si estaba activo), sal de la app y borra `MultiScreenDock.app`. Los ajustes están en `~/Library/Preferences/io.github.fgomsan.MultiScreenDock.plist`.
 
-La barra solo existe en el borde inferior. No reproduce rebote, globos de notificación, pilas de carpetas ni el aumento en curva del Dock del sistema. Incluye selector de idioma en vivo (8 idiomas) en el menú.
+La barra solo existe en el borde inferior. Incluye aumento continuo en onda cosenoidal a 120 Hz con bloqueo focal bajo el puntero, pilas de carpetas desplegables y selector de idioma en vivo (8 idiomas) en el menú; no reproduce globos numéricos de notificación ni barras de progreso de descarga.
 
 ## Support
 

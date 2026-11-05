@@ -85,6 +85,8 @@ final class HoverBubbleController {
     private let panel: NSPanel
     private let labelField: NSTextField
     private let effectView: NSVisualEffectView
+    private var lastShownText: String = ""
+    private var cachedSize: NSSize = .zero
 
     private init() {
         panel = NSPanel(
@@ -128,33 +130,48 @@ final class HoverBubbleController {
             hide()
             return
         }
-        labelField.stringValue = text
-        labelField.sizeToFit()
 
-        let padX: CGFloat = 11
-        let padY: CGFloat = 4.5
-        let width = min(max(labelField.frame.width + padX * 2, 46), 300)
-        let height = labelField.frame.height + padY * 2
+        let textChanged = (text != lastShownText) || cachedSize == .zero
+        if textChanged {
+            lastShownText = text
+            labelField.stringValue = text
+            labelField.sizeToFit()
 
-        labelField.frame = NSRect(
-            x: padX,
-            y: padY,
-            width: width - padX * 2,
-            height: labelField.frame.height
-        )
+            let padX: CGFloat = 11
+            let padY: CGFloat = 4.5
+            let width = min(max(ceil(labelField.frame.width) + padX * 2, 46), 300)
+            let height = ceil(labelField.frame.height + padY * 2)
+            cachedSize = NSSize(width: width, height: height)
 
-        var originX = screenRect.midX - width / 2
+            labelField.frame = NSRect(
+                x: padX,
+                y: padY,
+                width: width - padX * 2,
+                height: labelField.frame.height
+            )
+        }
+
+        let width = cachedSize.width
+        let height = cachedSize.height
+        var originX = round(screenRect.midX - width / 2)
         if let screenFrame = screen?.frame {
             originX = max(screenFrame.minX + 8, min(originX, screenFrame.maxX - width - 8))
         }
-        let originY = screenRect.maxY + 10
+        let originY = round(screenRect.maxY + 8)
+        let targetFrame = NSRect(x: originX, y: originY, width: width, height: height)
 
-        panel.setFrame(NSRect(x: originX, y: originY, width: width, height: height), display: true)
-        panel.orderFrontRegardless()
+        if panel.frame != targetFrame || textChanged {
+            panel.setFrame(targetFrame, display: textChanged)
+        }
+        if !panel.isVisible {
+            panel.orderFrontRegardless()
+        }
     }
 
     func hide() {
-        panel.orderOut(nil)
+        if panel.isVisible {
+            panel.orderOut(nil)
+        }
     }
 }
 
@@ -252,68 +269,82 @@ final class DockTileView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        guard let barPanel = window as? DockBarPanel, barPanel.isRevealed else { return }
         isHovered = true
-        if DockSettings.shared.hoverMagnification {
-            animateHover(hovered: true)
-        }
-        guard !FolderStackController.shared.isVisible else { return }
-        let rectInWin = convert(imageView.frame, to: nil)
-        let screenRect = barPanel.convertToScreen(rectInWin)
-        HoverBubbleController.shared.show(text: item.label, above: screenRect, on: barPanel.screen)
+        (window as? DockBarPanel)?.handlePointerInWindow(event.locationInWindow)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        (window as? DockBarPanel)?.handlePointerInWindow(event.locationInWindow)
     }
 
     override func mouseExited(with event: NSEvent) {
-        resetHoverVisuals()
+        isHovered = false
+        if let barPanel = window as? DockBarPanel {
+            let winPt = barPanel.convertPoint(fromScreen: NSEvent.mouseLocation)
+            barPanel.handlePointerInWindow(winPt)
+        }
     }
 
     func resetHoverVisuals() {
         isHovered = false
-        animateHover(hovered: false)
-        HoverBubbleController.shared.hide()
+        applyWaveState(
+            slotOriginX: frame.origin.x,
+            slotWidth: iconSize + tilePadX * 2,
+            magIconSize: iconSize,
+            liftY: 0
+        )
     }
 
-    private func animateHover(hovered: Bool) {
-        let scale: CGFloat = hovered ? 1.18 : 1.0
-        let lift: CGFloat = hovered ? 4.0 : 0.0
+    var liveIconFrameInSuperview: NSRect {
+        NSRect(
+            x: frame.origin.x + imageView.frame.origin.x,
+            y: frame.origin.y + imageView.frame.origin.y,
+            width: imageView.frame.width,
+            height: imageView.frame.height
+        )
+    }
 
-        let baseFrame = NSRect(x: tilePadX, y: 9, width: iconSize, height: iconSize)
-        let newSize = iconSize * scale
-        let dx = (newSize - iconSize) / 2.0
+    /// Updates tile & icon geometry directly on the GPU compositor with implicit CoreAnimation disabled (0 ms latency).
+    func applyWaveState(
+        slotOriginX: CGFloat,
+        slotWidth: CGFloat,
+        magIconSize: CGFloat,
+        liftY: CGFloat
+    ) {
+        let targetFrame = NSRect(
+            x: slotOriginX,
+            y: 1,
+            width: slotWidth,
+            height: magIconSize + liftY + 14
+        )
+        let targetIconFrame = NSRect(
+            x: (slotWidth - magIconSize) / 2.0,
+            y: 9 + liftY,
+            width: magIconSize,
+            height: magIconSize
+        )
 
-        NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.12
-            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
-            imageView.animator().frame = NSRect(
-                x: baseFrame.minX - dx,
-                y: baseFrame.minY + lift,
-                width: newSize,
-                height: newSize
-            )
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if frame != targetFrame {
+            frame = targetFrame
         }
+        if imageView.frame != targetIconFrame {
+            imageView.frame = targetIconFrame
+        }
+        dotLayer.position = CGPoint(x: slotWidth / 2.0, y: 3.5)
+        CATransaction.commit()
     }
 
     private func animateClickBounce() {
-        let current = imageView.frame
-        NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.08
-            imageView.animator().frame = current.offsetBy(dx: 0, dy: 6)
-        }, completionHandler: { [weak self] in
-            guard let self = self else { return }
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.12
-                let scale: CGFloat = (self.isHovered && DockSettings.shared.hoverMagnification) ? 1.18 : 1.0
-                let lift: CGFloat = (self.isHovered && DockSettings.shared.hoverMagnification) ? 4.0 : 0.0
-                let newSize = self.iconSize * scale
-                let dx = (newSize - self.iconSize) / 2.0
-                self.imageView.animator().frame = NSRect(
-                    x: self.tilePadX - dx,
-                    y: 9 + lift,
-                    width: newSize,
-                    height: newSize
-                )
-            }
-        })
+        guard let layer = imageView.layer else { return }
+        let bounce = CABasicAnimation(keyPath: "transform.translation.y")
+        bounce.fromValue = 0.0
+        bounce.toValue = 7.0
+        bounce.duration = 0.075
+        bounce.autoreverses = true
+        bounce.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        layer.add(bounce, forKey: "clickBounce")
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -655,14 +686,14 @@ final class DockTileView: NSView {
         switch item.kind {
         case .application, .trash:
             guard !mask.isEmpty else { return [] }
-            animateHover(hovered: true)
+            (window as? DockBarPanel)?.handlePointerInWindow(sender.draggingLocation)
             return .generic
         case .directoryOrFile(_, let isDir, _) where isDir:
             if mask.contains(.move) {
-                animateHover(hovered: true)
+                (window as? DockBarPanel)?.handlePointerInWindow(sender.draggingLocation)
                 return .move
             } else if mask.contains(.copy) {
-                animateHover(hovered: true)
+                (window as? DockBarPanel)?.handlePointerInWindow(sender.draggingLocation)
                 return .copy
             }
             return []
@@ -671,12 +702,20 @@ final class DockTileView: NSView {
         }
     }
 
+    override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation {
+        (window as? DockBarPanel)?.handlePointerInWindow(sender.draggingLocation)
+        return draggingEntered(sender)
+    }
+
     override func draggingExited(_ sender: NSDraggingInfo?) {
-        animateHover(hovered: false)
+        if let barPanel = window as? DockBarPanel {
+            let winPt = barPanel.convertPoint(fromScreen: NSEvent.mouseLocation)
+            barPanel.handlePointerInWindow(winPt)
+        }
     }
 
     override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
-        animateHover(hovered: false)
+        (window as? DockBarPanel)?.handlePointerExitedBar()
         let mask = sender.draggingSourceOperationMask
         guard let urls = sender.draggingPasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL],
               !urls.isEmpty else {
@@ -851,8 +890,8 @@ enum DockLayoutMath {
     /// the bottom trigger strip can never oscillate between reveal and hide.
     static func keepAliveZone(screenFrame: NSRect, barSize: NSSize, bottomMargin: CGFloat) -> NSRect {
         let maxTrigger = triggerZone(screenFrame: screenFrame, barSize: barSize, hasScreenBelow: true)
-        let barKeepWidth = min(screenFrame.width, max(maxTrigger.width + 16, barSize.width + 80))
-        let barKeepHeight = max(maxTrigger.height + 12, bottomMargin + barSize.height + 24)
+        let barKeepWidth = min(screenFrame.width, max(maxTrigger.width + 16, barSize.width + 104))
+        let barKeepHeight = max(maxTrigger.height + 12, bottomMargin + barSize.height + 38)
         let barKeep = NSRect(
             x: round(screenFrame.midX - barKeepWidth / 2),
             y: screenFrame.minY,
@@ -860,6 +899,196 @@ enum DockLayoutMath {
             height: barKeepHeight
         )
         return barKeep.union(maxTrigger)
+    }
+
+    struct WaveSlotInput: Equatable {
+        let isSeparator: Bool
+    }
+
+    struct WaveSlotFrame: Equatable {
+        let tileOriginX: CGFloat
+        let slotWidth: CGFloat
+        let iconSize: CGFloat
+        let liftY: CGFloat
+        let weight: CGFloat
+    }
+
+    struct WaveLayoutResult: Equatable {
+        let barOriginXInContainer: CGFloat
+        let barWidth: CGFloat
+        let slots: [WaveSlotFrame]
+        let hoveredSlotIndex: Int?
+    }
+
+    /// Computes a continuous, real-time raised-cosine magnification wave matching Apple's macOS Dock.
+    /// Uses piecewise-linear focal-point locking so the icon directly underneath `cursorXInContainer`
+    /// never drifts sideways away from the pointer, even at the far left or right ends of the Dock.
+    static func computeWaveLayout(
+        slots: [WaveSlotInput],
+        baseIconSize: CGFloat,
+        containerWidth: CGFloat,
+        cursorXInContainer: CGFloat?,
+        envelope: CGFloat
+    ) -> WaveLayoutResult {
+        let padX: CGFloat = 9
+        let pg = tilePadAndGap(for: baseIconSize)
+        let baseTileW = baseIconSize + pg.pad * 2
+
+        var restOrigins: [CGFloat] = []
+        var restWidths: [CGFloat] = []
+        restOrigins.reserveCapacity(slots.count)
+        restWidths.reserveCapacity(slots.count)
+
+        var rCursor: CGFloat = padX
+        var rLastWasTile = false
+        for s in slots {
+            if s.isSeparator {
+                if rLastWasTile { rCursor -= pg.gap }
+                restOrigins.append(rCursor)
+                restWidths.append(11)
+                rCursor += 11
+                rLastWasTile = false
+            } else {
+                restOrigins.append(rCursor)
+                restWidths.append(baseTileW)
+                rCursor += baseTileW + pg.gap
+                rLastWasTile = true
+            }
+        }
+        if rLastWasTile { rCursor -= pg.gap }
+        let restBarWidth = max(60, rCursor + padX)
+        let restBarOriginX = round((containerWidth - restBarWidth) / 2.0)
+
+        let clampedEnv = min(max(envelope, 0.0), 1.0)
+        guard let cursorX = cursorXInContainer else {
+            let restSlots: [WaveSlotFrame] = slots.enumerated().map { idx, s in
+                WaveSlotFrame(
+                    tileOriginX: restOrigins[idx],
+                    slotWidth: restWidths[idx],
+                    iconSize: s.isSeparator ? 0 : baseIconSize,
+                    liftY: 0,
+                    weight: 0
+                )
+            }
+            return WaveLayoutResult(
+                barOriginXInContainer: restBarOriginX,
+                barWidth: restBarWidth,
+                slots: restSlots,
+                hoveredSlotIndex: nil
+            )
+        }
+
+        let relCursorX = cursorX - restBarOriginX
+        let pitch = baseTileW + pg.gap
+        let influenceRadius = max(72.0, pitch * 2.45)
+        let maxExtraScale: CGFloat = 0.42
+
+        var expOrigins: [CGFloat] = []
+        var expFrames: [WaveSlotFrame] = []
+        expOrigins.reserveCapacity(slots.count)
+        expFrames.reserveCapacity(slots.count)
+
+        var eCursor: CGFloat = padX
+        var eLastWasTile = false
+
+        for (idx, s) in slots.enumerated() {
+            if s.isSeparator {
+                if eLastWasTile { eCursor -= pg.gap }
+                let frame = WaveSlotFrame(
+                    tileOriginX: eCursor,
+                    slotWidth: 11,
+                    iconSize: 0,
+                    liftY: 0,
+                    weight: 0
+                )
+                expOrigins.append(eCursor)
+                expFrames.append(frame)
+                eCursor += 11
+                eLastWasTile = false
+            } else {
+                let restCenter = restOrigins[idx] + restWidths[idx] * 0.5
+                let dist = abs(relCursorX - restCenter) / influenceRadius
+                let rawW: CGFloat = dist < 1.0 ? 0.5 * (1.0 + cos(.pi * dist)) : 0.0
+                let w = rawW * clampedEnv
+                let magIcon = min(76.0, baseIconSize * (1.0 + maxExtraScale * w))
+                let slotW = magIcon + pg.pad * 2
+                let lift = 3.5 * w
+                let frame = WaveSlotFrame(
+                    tileOriginX: eCursor,
+                    slotWidth: slotW,
+                    iconSize: magIcon,
+                    liftY: lift,
+                    weight: w
+                )
+                expOrigins.append(eCursor)
+                expFrames.append(frame)
+                eCursor += slotW + pg.gap
+                eLastWasTile = true
+            }
+        }
+        if eLastWasTile { eCursor -= pg.gap }
+        let expandedBarWidth = max(60, eCursor + padX)
+
+        // Piecewise-linear focal lock between rest landmarks and expanded landmarks
+        let barOriginX: CGFloat
+        if clampedEnv <= 0.0005 || slots.isEmpty {
+            barOriginX = restBarOriginX
+        } else {
+            var restKnots: [CGFloat] = [0]
+            var expKnots: [CGFloat] = [0]
+            for idx in 0..<slots.count {
+                restKnots.append(restOrigins[idx])
+                expKnots.append(expOrigins[idx])
+                restKnots.append(restOrigins[idx] + restWidths[idx])
+                expKnots.append(expOrigins[idx] + expFrames[idx].slotWidth)
+            }
+            restKnots.append(restBarWidth)
+            expKnots.append(expandedBarWidth)
+
+            let c = min(max(relCursorX, 0), restBarWidth)
+            var mappedExpX = c
+            for k in 0..<(restKnots.count - 1) {
+                let r0 = restKnots[k]
+                let r1 = restKnots[k + 1]
+                if c >= r0 && c <= r1 {
+                    let span = r1 - r0
+                    if span > 0.0001 {
+                        let frac = (c - r0) / span
+                        mappedExpX = expKnots[k] + frac * (expKnots[k + 1] - expKnots[k])
+                    } else {
+                        mappedExpX = expKnots[k]
+                    }
+                    break
+                }
+            }
+
+            let rawBarOriginX = restBarOriginX + (c - mappedExpX)
+            if expandedBarWidth <= containerWidth - 4 {
+                barOriginX = min(max(rawBarOriginX, 2.0), containerWidth - expandedBarWidth - 2.0)
+            } else {
+                barOriginX = (containerWidth - expandedBarWidth) * 0.5
+            }
+        }
+
+        // Determine hovered non-separator slot using rendered visual spans (eliminates 2 pt inter-tile flicker)
+        var hoveredIdx: Int?
+        let halfGap = max(1.5, pg.gap * 0.65)
+        for (idx, s) in slots.enumerated() where !s.isSeparator {
+            let f = expFrames[idx]
+            let left = barOriginX + f.tileOriginX - halfGap
+            let right = barOriginX + f.tileOriginX + f.slotWidth + halfGap
+            if cursorX >= left && cursorX <= right {
+                hoveredIdx = idx
+                break
+            }
+        }
+
+        return WaveLayoutResult(
+            barOriginXInContainer: barOriginX,
+            barWidth: expandedBarWidth,
+            slots: expFrames,
+            hoveredSlotIndex: hoveredIdx
+        )
     }
 
     /// Structural identity of the Dock bar layout (excluding transient running/frontmost dots or empty/full Trash icon).
@@ -940,6 +1169,37 @@ final class ClippedPassthroughRootView: NSView {
     weak var slidingContainer: NSView?
     weak var barBackgroundView: NSView?
     weak var tilesContainerView: NSView?
+    private var barTrackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let existing = barTrackingArea {
+            removeTrackingArea(existing)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeAlways, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        barTrackingArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        (window as? DockBarPanel)?.handlePointerInWindow(event.locationInWindow)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        (window as? DockBarPanel)?.handlePointerInWindow(event.locationInWindow)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        if let barPanel = window as? DockBarPanel {
+            let winPt = barPanel.convertPoint(fromScreen: NSEvent.mouseLocation)
+            barPanel.handlePointerInWindow(winPt)
+        }
+    }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard let sliding = slidingContainer else { return nil }
@@ -961,14 +1221,19 @@ final class ClippedPassthroughRootView: NSView {
 }
 
 final class DockBarPanel: NSPanel {
+    private enum RenderedBarElement {
+        case tile(DockTileView)
+        case separator(NSView)
+    }
+
     var isContextMenuOpen = false
     var isFolderStackOpen = false
     var hasActivePopup: Bool { isContextMenuOpen || isFolderStackOpen }
     private(set) var isRevealed = false
     private var animationToken: Int = 0
 
-    private let sideShadowPad: CGFloat = 14
-    private let topHeadroom: CGFloat = 20
+    private let maxWaveSideHeadroom: CGFloat = 58
+    private let topHeadroom: CGFloat = 40
 
     private let slidingContainer = NSView()
     private let shadowCarrier = NSView()
@@ -976,9 +1241,19 @@ final class DockBarPanel: NSPanel {
     private let itemsContainer = NSView()
 
     private var currentItems: [DockItem] = []
+    private var renderedElements: [RenderedBarElement] = []
+    private var cachedWaveSlotInputs: [DockLayoutMath.WaveSlotInput] = []
     private var lastStructuralSignature: [String] = []
     private var lastEffectiveIconSize: CGFloat = 0
     private(set) var currentBarSize: NSSize = NSSize(width: 400, height: 52)
+
+    private var waveEnvelope: CGFloat = 0.0
+    private var targetWaveEnvelope: CGFloat = 0.0
+    private var lastCursorXInContainer: CGFloat?
+    private var envelopeTimer: Timer?
+    private var lastEnvelopeTickTime: CFTimeInterval = 0
+    private var activeHoverGlobalMonitor: Any?
+    private var activeHoverLocalMonitor: Any?
 
     init(screen: NSScreen) {
         super.init(
@@ -1088,22 +1363,225 @@ final class DockBarPanel: NSPanel {
         }
 
         positionWindowFrame(on: screen)
+        renderCurrentWaveFrame()
 
         if isRevealed {
-            slidingContainer.frame.origin = NSPoint(x: sideShadowPad, y: DockSettings.shared.bottomMargin)
+            slidingContainer.frame.origin = NSPoint(x: 0, y: DockSettings.shared.bottomMargin)
             slidingContainer.alphaValue = 1.0
         }
     }
 
     private func updateTileStatesInPlace(items: [DockItem]) {
         let nonSeparatorItems = items.filter { $0.kind != .separator }
-        let tiles = itemsContainer.subviews.compactMap { $0 as? DockTileView }
+        let tiles = renderedElements.compactMap { elem -> DockTileView? in
+            if case .tile(let t) = elem { return t }
+            return nil
+        }
         guard tiles.count == nonSeparatorItems.count else {
             rebuildSubviews(items: items, iconSize: lastEffectiveIconSize)
             return
         }
         for (tile, item) in zip(tiles, nonSeparatorItems) {
             tile.update(item: item)
+        }
+    }
+
+    // MARK: - 120 Hz Real-Time Cosine Magnification Wave
+
+    func handlePointerInWindow(_ winPoint: NSPoint) {
+        guard isRevealed, !hasActivePopup else { return }
+        let ptInSliding = slidingContainer.convert(winPoint, from: nil)
+
+        let barMinX = backgroundView.frame.minX - 10
+        let barMaxX = backgroundView.frame.maxX + 10
+        let insideWaveZone = ptInSliding.x >= barMinX
+            && ptInSliding.x <= barMaxX
+            && ptInSliding.y >= -6
+            && ptInSliding.y <= (currentBarSize.height + topHeadroom - 2)
+
+        guard insideWaveZone else {
+            handlePointerExitedBar()
+            return
+        }
+
+        lastCursorXInContainer = ptInSliding.x
+        targetWaveEnvelope = DockSettings.shared.hoverMagnification ? 1.0 : 0.0
+        installActiveHoverMonitorsIfNeeded()
+        renderCurrentWaveFrame()
+        ensureEnvelopeTimerIfNeeded()
+    }
+
+    func handlePointerExitedBar() {
+        removeActiveHoverMonitors()
+        targetWaveEnvelope = 0.0
+        HoverBubbleController.shared.hide()
+        if waveEnvelope <= 0.001 {
+            waveEnvelope = 0.0
+            lastCursorXInContainer = nil
+            stopEnvelopeTimer()
+            renderCurrentWaveFrame()
+        } else {
+            ensureEnvelopeTimerIfNeeded()
+        }
+    }
+
+    private func installActiveHoverMonitorsIfNeeded() {
+        guard activeHoverGlobalMonitor == nil, activeHoverLocalMonitor == nil else { return }
+        let mask: NSEvent.EventTypeMask = [.mouseMoved, .leftMouseDragged, .rightMouseDragged]
+        activeHoverGlobalMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] _ in
+            guard let self = self else { return }
+            let winPt = self.convertPoint(fromScreen: NSEvent.mouseLocation)
+            self.handlePointerInWindow(winPt)
+        }
+        activeHoverLocalMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
+            if let self = self {
+                let winPt = self.convertPoint(fromScreen: NSEvent.mouseLocation)
+                self.handlePointerInWindow(winPt)
+            }
+            return event
+        }
+    }
+
+    private func removeActiveHoverMonitors() {
+        if let g = activeHoverGlobalMonitor {
+            NSEvent.removeMonitor(g)
+            activeHoverGlobalMonitor = nil
+        }
+        if let l = activeHoverLocalMonitor {
+            NSEvent.removeMonitor(l)
+            activeHoverLocalMonitor = nil
+        }
+    }
+
+    private func ensureEnvelopeTimerIfNeeded() {
+        guard abs(waveEnvelope - targetWaveEnvelope) > 0.002 else {
+            waveEnvelope = targetWaveEnvelope
+            if targetWaveEnvelope == 0 {
+                lastCursorXInContainer = nil
+            }
+            stopEnvelopeTimer()
+            return
+        }
+        guard envelopeTimer == nil else { return }
+        lastEnvelopeTickTime = CACurrentMediaTime()
+        let timer = Timer(timeInterval: 1.0 / 120.0, repeats: true) { [weak self] _ in
+            self?.tickWaveEnvelope()
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        envelopeTimer = timer
+    }
+
+    private func stopEnvelopeTimer() {
+        envelopeTimer?.invalidate()
+        envelopeTimer = nil
+    }
+
+    private func tickWaveEnvelope() {
+        let now = CACurrentMediaTime()
+        let dt = min(0.05, max(0.001, now - lastEnvelopeTickTime))
+        lastEnvelopeTickTime = now
+
+        // Verify pointer hasn't left the bar during fast cross-display flicks
+        if targetWaveEnvelope > 0 {
+            let liveWinPt = convertPoint(fromScreen: NSEvent.mouseLocation)
+            let ptInSliding = slidingContainer.convert(liveWinPt, from: nil)
+            let inside = ptInSliding.x >= backgroundView.frame.minX - 10
+                && ptInSliding.x <= backgroundView.frame.maxX + 10
+                && ptInSliding.y >= -6
+                && ptInSliding.y <= (currentBarSize.height + topHeadroom - 2)
+            if inside {
+                lastCursorXInContainer = ptInSliding.x
+            } else {
+                targetWaveEnvelope = 0.0
+                removeActiveHoverMonitors()
+                HoverBubbleController.shared.hide()
+            }
+        }
+
+        if waveEnvelope < targetWaveEnvelope {
+            // Crisp 55 ms bloom on entry with exponential ease-out feel
+            let step = CGFloat(dt / 0.055)
+            waveEnvelope = min(targetWaveEnvelope, waveEnvelope + max(step, (targetWaveEnvelope - waveEnvelope) * 0.38))
+        } else if waveEnvelope > targetWaveEnvelope {
+            // Smooth 90 ms settle when leaving the bar
+            let step = CGFloat(dt / 0.090)
+            waveEnvelope = max(targetWaveEnvelope, waveEnvelope - max(step * 0.65, (waveEnvelope - targetWaveEnvelope) * 0.28))
+        }
+
+        if abs(waveEnvelope - targetWaveEnvelope) <= 0.003 {
+            waveEnvelope = targetWaveEnvelope
+            if targetWaveEnvelope == 0 {
+                lastCursorXInContainer = nil
+            }
+            stopEnvelopeTimer()
+        }
+
+        renderCurrentWaveFrame()
+    }
+
+    private func renderCurrentWaveFrame() {
+        guard !renderedElements.isEmpty, lastEffectiveIconSize > 0 else { return }
+        let containerW = max(slidingContainer.frame.width, currentBarSize.width)
+        let effectiveCursorX = (targetWaveEnvelope > 0 || waveEnvelope > 0.001 || activeHoverGlobalMonitor != nil)
+            ? lastCursorXInContainer
+            : nil
+
+        let layout = DockLayoutMath.computeWaveLayout(
+            slots: cachedWaveSlotInputs,
+            baseIconSize: lastEffectiveIconSize,
+            containerWidth: containerW,
+            cursorXInContainer: effectiveCursorX,
+            envelope: DockSettings.shared.hoverMagnification ? waveEnvelope : 0.0
+        )
+
+        let bgFrame = NSRect(
+            x: layout.barOriginXInContainer,
+            y: 0,
+            width: layout.barWidth,
+            height: currentBarSize.height
+        )
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if backgroundView.frame != bgFrame {
+            backgroundView.frame = bgFrame
+            shadowCarrier.frame = bgFrame
+            shadowCarrier.layer?.shadowPath = CGPath(
+                roundedRect: shadowCarrier.bounds,
+                cornerWidth: 17,
+                cornerHeight: 17,
+                transform: nil
+            )
+        }
+
+        for (idx, elem) in renderedElements.enumerated() where idx < layout.slots.count {
+            let slot = layout.slots[idx]
+            let x = layout.barOriginXInContainer + slot.tileOriginX
+            switch elem {
+            case .separator(let sepView):
+                sepView.frame.origin.x = x + 5.0
+            case .tile(let tileView):
+                tileView.applyWaveState(
+                    slotOriginX: x,
+                    slotWidth: slot.slotWidth,
+                    magIconSize: slot.iconSize,
+                    liftY: slot.liftY
+                )
+            }
+        }
+        CATransaction.commit()
+
+        if !hasActivePopup,
+           !FolderStackController.shared.isVisible,
+           activeHoverGlobalMonitor != nil,
+           let hIdx = layout.hoveredSlotIndex,
+           hIdx < renderedElements.count,
+           case .tile(let hoveredTile) = renderedElements[hIdx] {
+            let rectInWin = slidingContainer.convert(hoveredTile.liveIconFrameInSuperview, to: nil)
+            let screenRect = convertToScreen(rectInWin)
+            HoverBubbleController.shared.show(text: hoveredTile.item.label, above: screenRect, on: screen)
+        } else if activeHoverGlobalMonitor == nil {
+            HoverBubbleController.shared.hide()
         }
     }
 
@@ -1115,26 +1593,31 @@ final class DockBarPanel: NSPanel {
         ignoresMouseEvents = false
 
         positionWindowFrame(on: screen)
+        renderCurrentWaveFrame()
 
         let targetY = DockSettings.shared.bottomMargin
         let hiddenY = -(currentBarSize.height + 10)
 
         // If concealed half-way, animate smoothly from current slidingContainer origin; if fully ordered out, start from hiddenY.
         if !isVisible {
-            slidingContainer.frame.origin = NSPoint(x: sideShadowPad, y: animated ? hiddenY : targetY)
+            slidingContainer.frame.origin = NSPoint(x: 0, y: animated ? hiddenY : targetY)
             slidingContainer.alphaValue = animated ? 0.0 : 1.0
             orderFrontRegardless()
         }
 
         if animated {
-            NSAnimationContext.runAnimationGroup { ctx in
-                ctx.duration = 0.19
-                ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.20, 0.92, 0.25, 1.0)
-                slidingContainer.animator().frame.origin = NSPoint(x: sideShadowPad, y: targetY)
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.15
+                ctx.timingFunction = CAMediaTimingFunction(controlPoints: 0.16, 1.0, 0.30, 1.0)
+                slidingContainer.animator().frame.origin = NSPoint(x: 0, y: targetY)
                 slidingContainer.animator().alphaValue = 1.0
-            }
+            }, completionHandler: { [weak self] in
+                guard let self = self, self.isRevealed else { return }
+                let winPt = self.convertPoint(fromScreen: NSEvent.mouseLocation)
+                self.handlePointerInWindow(winPt)
+            })
         } else {
-            slidingContainer.frame.origin = NSPoint(x: sideShadowPad, y: targetY)
+            slidingContainer.frame.origin = NSPoint(x: 0, y: targetY)
             slidingContainer.alphaValue = 1.0
         }
     }
@@ -1152,15 +1635,18 @@ final class DockBarPanel: NSPanel {
         isRevealed = false
         ignoresMouseEvents = true
 
-        for case let tile as DockTileView in itemsContainer.subviews {
-            tile.resetHoverVisuals()
-        }
+        removeActiveHoverMonitors()
+        stopEnvelopeTimer()
+        waveEnvelope = 0.0
+        targetWaveEnvelope = 0.0
+        lastCursorXInContainer = nil
+        renderCurrentWaveFrame()
         HoverBubbleController.shared.hide()
 
         let hiddenY = -(currentBarSize.height + 10)
 
         if !animated || !isVisible {
-            slidingContainer.frame.origin = NSPoint(x: sideShadowPad, y: hiddenY)
+            slidingContainer.frame.origin = NSPoint(x: 0, y: hiddenY)
             slidingContainer.alphaValue = 0.0
             orderOut(nil)
             onConcealed?()
@@ -1168,9 +1654,9 @@ final class DockBarPanel: NSPanel {
         }
 
         NSAnimationContext.runAnimationGroup({ ctx in
-            ctx.duration = 0.17
+            ctx.duration = 0.15
             ctx.timingFunction = CAMediaTimingFunction(name: .easeIn)
-            slidingContainer.animator().frame.origin = NSPoint(x: sideShadowPad, y: hiddenY)
+            slidingContainer.animator().frame.origin = NSPoint(x: 0, y: hiddenY)
             slidingContainer.animator().alphaValue = 0.0
         }, completionHandler: { [weak self] in
             guard let self = self else { return }
@@ -1211,16 +1697,12 @@ final class DockBarPanel: NSPanel {
 
     private func rebuildSubviews(items: [DockItem], iconSize: CGFloat) {
         itemsContainer.subviews.forEach { $0.removeFromSuperview() }
+        renderedElements.removeAll(keepingCapacity: true)
+        cachedWaveSlotInputs.removeAll(keepingCapacity: true)
 
         let barSz = barSize(for: items, iconSize: iconSize)
         currentBarSize = barSz
         let pg = DockLayoutMath.tilePadAndGap(for: iconSize)
-
-        slidingContainer.frame.size = NSSize(width: barSz.width, height: barSz.height + topHeadroom)
-        shadowCarrier.frame = NSRect(x: 0, y: 0, width: barSz.width, height: barSz.height)
-        shadowCarrier.layer?.shadowPath = CGPath(roundedRect: shadowCarrier.bounds, cornerWidth: 17, cornerHeight: 17, transform: nil)
-        backgroundView.frame = NSRect(x: 0, y: 0, width: barSz.width, height: barSz.height)
-        itemsContainer.frame = NSRect(x: 0, y: 0, width: barSz.width, height: barSz.height + topHeadroom)
 
         var cursorX: CGFloat = 9
         var lastWasTile = false
@@ -1238,12 +1720,16 @@ final class DockBarPanel: NSPanel {
                 sepView.wantsLayer = true
                 sepView.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.24).cgColor
                 itemsContainer.addSubview(sepView)
+                renderedElements.append(.separator(sepView))
+                cachedWaveSlotInputs.append(.init(isSeparator: true))
                 cursorX += 11
                 lastWasTile = false
             } else {
                 let tile = DockTileView(item: item, iconSize: iconSize, tilePadX: pg.pad)
                 tile.frame.origin = NSPoint(x: cursorX, y: 1)
                 itemsContainer.addSubview(tile)
+                renderedElements.append(.tile(tile))
+                cachedWaveSlotInputs.append(.init(isSeparator: false))
                 cursorX += tile.frame.width + pg.gap
                 lastWasTile = true
             }
@@ -1251,8 +1737,11 @@ final class DockBarPanel: NSPanel {
     }
 
     private func positionWindowFrame(on screen: NSScreen) {
-        let winWidth = currentBarSize.width + sideShadowPad * 2
+        let winWidth = min(screen.frame.width, currentBarSize.width + maxWaveSideHeadroom * 2)
         let winHeight = DockSettings.shared.bottomMargin + currentBarSize.height + topHeadroom
+
+        slidingContainer.frame.size = NSSize(width: winWidth, height: currentBarSize.height + topHeadroom)
+        itemsContainer.frame = NSRect(x: 0, y: 0, width: winWidth, height: currentBarSize.height + topHeadroom)
 
         let originX = round(screen.frame.midX - winWidth / 2.0)
         let originY = round(screen.frame.minY)

@@ -31,7 +31,7 @@ final class UpdateChecker {
                 return trimmed
             }
         }
-        return "1.3.5"
+        return "1.4.0"
     }
 
     // MARK: - Pure Testable Helpers

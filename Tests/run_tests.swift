@@ -435,6 +435,204 @@ func testUpdateCheckerAndFeedbackHelpers() {
     }
 }
 
+// 13. Folder Stacks (v1.4.0): plist config parsing, 5 sort modes, Fan/Grid/List resolution, screen-clamped Fan geometry & directory reader
+func testFolderStackSortStyleGeometryAndDirectoryReader() {
+    defer { L10n.overrideLanguageForTesting = nil }
+
+    // 13a. Plist config parsing defaults (Downloads defaults to Date Added + Automatic; generic folder to Name)
+    let downloadsURL = URL(fileURLWithPath: "/Users/test/Downloads", isDirectory: true)
+    let docsURL = URL(fileURLWithPath: "/Users/test/Documents", isDirectory: true)
+    let dlDefaultCfg = DockFolderStackConfig.parse(from: [:], folderURL: downloadsURL)
+    expect(dlDefaultCfg.sortOrder == .dateAdded, "Downloads without arrangement key must default to .dateAdded")
+    expect(dlDefaultCfg.style == .automatic, "Downloads without showas key must default to .automatic")
+    expect(dlDefaultCfg.displayAsStack == true, "Downloads without displayas key must default to stack")
+
+    let explicitFanCfg = DockFolderStackConfig.parse(
+        from: ["arrangement": 2, "showas": 1, "displayas": 0],
+        folderURL: downloadsURL
+    )
+    expect(explicitFanCfg.sortOrder == .dateAdded && explicitFanCfg.style == .fan, "Explicit arrangement=2, showas=1 must parse to Date Added + Fan")
+
+    let docsCfg = DockFolderStackConfig.parse(from: [:], folderURL: docsURL)
+    expect(docsCfg.sortOrder == .name && docsCfg.displayAsStack == false, "Generic folder must default to .name and folder display")
+
+    // 13b. Sorting across Name, Date Added (descending), Date Modified (descending), Kind
+    let t1 = Date(timeIntervalSince1970: 1_000)
+    let t2 = Date(timeIntervalSince1970: 2_000)
+    let t3 = Date(timeIntervalSince1970: 3_000)
+    let sampleEntries = [
+        FolderStackEntry(url: URL(fileURLWithPath: "/tmp/file10.pdf"), displayName: "file10.pdf", isSubfolder: false, dateAdded: t1, dateModified: t3, dateCreated: t1, kindDescription: "PDF Document", fileSize: 100),
+        FolderStackEntry(url: URL(fileURLWithPath: "/tmp/file2.png"), displayName: "file2.png", isSubfolder: false, dateAdded: t3, dateModified: t1, dateCreated: t2, kindDescription: "PNG Image", fileSize: 200),
+        FolderStackEntry(url: URL(fileURLWithPath: "/tmp/Archive"), displayName: "Archive", isSubfolder: true, dateAdded: t2, dateModified: t2, dateCreated: t3, kindDescription: "Folder", fileSize: nil)
+    ]
+
+    let byName = FolderStackEngine.sortEntries(sampleEntries, by: .name)
+    expect(byName.map(\.displayName) == ["Archive", "file2.png", "file10.pdf"], "Natural Finder sort must put file2 before file10")
+
+    let byAdded = FolderStackEngine.sortEntries(sampleEntries, by: .dateAdded)
+    expect(byAdded.first?.displayName == "file2.png" && byAdded.last?.displayName == "file10.pdf", "Date Added sort must place newest-added item first")
+
+    let byModified = FolderStackEngine.sortEntries(sampleEntries, by: .dateModified)
+    expect(byModified.first?.displayName == "file10.pdf", "Date Modified sort must place most-recently-modified item first")
+
+    let byKind = FolderStackEngine.sortEntries(sampleEntries, by: .kind)
+    expect(byKind.first?.displayName == "Archive", "Kind sort must order Folder ahead of PDF/PNG")
+
+    // 13c. Effective style resolution (Auto: 1..7 -> Fan, >=8 -> Grid, 0 -> Grid, Subfolder -> Grid)
+    expect(
+        FolderStackEngine.resolveEffectiveStyle(preference: .dockDefault, dockConfig: dlDefaultCfg, itemCount: 5, isSubfolder: false) == .fan,
+        "Automatic style with 5 items must choose .fan"
+    )
+    expect(
+        FolderStackEngine.resolveEffectiveStyle(preference: .dockDefault, dockConfig: dlDefaultCfg, itemCount: 12, isSubfolder: false) == .grid,
+        "Automatic style with 12 items must choose .grid"
+    )
+    expect(
+        FolderStackEngine.resolveEffectiveStyle(preference: .fan, dockConfig: explicitFanCfg, itemCount: 0, isSubfolder: false) == .grid,
+        "Empty folder in Fan mode must render clean empty-state card (.grid)"
+    )
+    expect(
+        FolderStackEngine.resolveEffectiveStyle(preference: .fan, dockConfig: explicitFanCfg, itemCount: 4, isSubfolder: true) == .grid,
+        "Drilling into a subfolder from Fan must switch to .grid card with Back button"
+    )
+    expect(
+        FolderStackEngine.resolveEffectiveStyle(preference: .list, dockConfig: explicitFanCfg, itemCount: 4, isSubfolder: false) == .list,
+        "User preference override (.list) must override plist showas=1"
+    )
+
+    // 13d. Fan curve geometry stays strictly inside screen horizontal bounds even near right/left display edges
+    let rightEdgeCenters = FolderStackEngine.computeFanIconCenters(
+        rowCount: 9,
+        anchorMidX: 2545,
+        baseY: 70,
+        screenMinX: 0,
+        screenMaxX: 2560,
+        iconSize: 50
+    )
+    expect(rightEdgeCenters.count == 9, "computeFanIconCenters must return exact rowCount")
+    for pt in rightEdgeCenters {
+        expect(pt.x - 25 >= 0 && pt.x + 25 <= 2560, "Fan icon at right display edge must never clip off-screen (got x=\(pt.x))")
+    }
+
+    // 13e. Real temp directory reader skips dotfiles and treats .app bundles as openable files rather than subfolders
+    let fm = FileManager.default
+    let tmpDir = fm.temporaryDirectory.appendingPathComponent("msd_stack_test_\(UUID().uuidString)", isDirectory: true)
+    defer { try? fm.removeItem(at: tmpDir) }
+    try? fm.createDirectory(at: tmpDir, withIntermediateDirectories: true)
+    try? Data("hi".utf8).write(to: tmpDir.appendingPathComponent(".DS_Store"))
+    try? Data("pdf".utf8).write(to: tmpDir.appendingPathComponent("report.pdf"))
+    try? fm.createDirectory(at: tmpDir.appendingPathComponent("Subfolder", isDirectory: true), withIntermediateDirectories: true)
+    let fakeApp = tmpDir.appendingPathComponent("Sample.app", isDirectory: true)
+    try? fm.createDirectory(at: fakeApp.appendingPathComponent("Contents", isDirectory: true), withIntermediateDirectories: true)
+
+    if let readEntries = try? FolderStackEngine.readDirectoryEntries(at: tmpDir, sortOrder: .name) {
+        expect(readEntries.count == 3, "Directory reader must skip .DS_Store and return 3 visible items")
+        let sub = readEntries.first { $0.displayName.hasPrefix("Subfolder") }
+        let app = readEntries.first { $0.url.lastPathComponent == "Sample.app" }
+        expect(sub?.isSubfolder == true, "Regular directory must be marked isSubfolder = true")
+        expect(app?.isSubfolder == false, ".app bundle in Downloads must NOT be treated as a drill-down subfolder")
+    } else {
+        expect(false, "readDirectoryEntries failed on temp directory")
+    }
+
+    // 13f. All 8 languages non-empty for v1.4.0 strings
+    for lang in AppLanguage.allCases where lang != .system {
+        L10n.overrideLanguageForTesting = lang
+        expect(!L10n.openFolderStack.isEmpty, "openFolderStack empty for \(lang)")
+        expect(!L10n.stackEmptyFolder.isEmpty, "stackEmptyFolder empty for \(lang)")
+        expect(L10n.stackMoreInFinder(14).contains("14"), "stackMoreInFinder missing count for \(lang)")
+        expect(!L10n.stackBackBtn.isEmpty, "stackBackBtn empty for \(lang)")
+        expect(!L10n.stackStyleMenu.isEmpty, "stackStyleMenu empty for \(lang)")
+        expect(!L10n.stackStyleDockDefault.isEmpty, "stackStyleDockDefault empty for \(lang)")
+        expect(!L10n.stackStyleFan.isEmpty, "stackStyleFan empty for \(lang)")
+        expect(!L10n.stackStyleGrid.isEmpty, "stackStyleGrid empty for \(lang)")
+        expect(!L10n.stackStyleList.isEmpty, "stackStyleList empty for \(lang)")
+    }
+}
+
+// 14. Continuous 120 Hz raised-cosine magnification wave, neighbor falloff, focal-point lock & gap-free label tracking
+func testContinuousCosineWaveMagnificationAndFocalLock() {
+    // 8 tiles + 1 separator + 2 tiles = 11 slots
+    var slots: [DockLayoutMath.WaveSlotInput] = Array(repeating: .init(isSeparator: false), count: 8)
+    slots.append(.init(isSeparator: true))
+    slots.append(.init(isSeparator: false))
+    slots.append(.init(isSeparator: false))
+
+    let mockItems: [DockItem] = slots.enumerated().map { idx, s in
+        DockItem(
+            id: "w-\(idx)",
+            label: "Item \(idx)",
+            kind: s.isSeparator ? .separator : .finder,
+            icon: NSImage(),
+            isRunning: false,
+            isFrontmost: false
+        )
+    }
+
+    let baseIcon: CGFloat = 36
+    let expectedBarSz = DockLayoutMath.barSize(for: mockItems, iconSize: baseIcon)
+    let containerW = expectedBarSz.width + 116 // +58 headroom per side
+
+    // 14a. Rest layout (cursor = nil, envelope = 0) matches barSize exactly
+    let rest = DockLayoutMath.computeWaveLayout(
+        slots: slots,
+        baseIconSize: baseIcon,
+        containerWidth: containerW,
+        cursorXInContainer: nil,
+        envelope: 0.0
+    )
+    expect(abs(rest.barWidth - expectedBarSz.width) < 0.01, "Rest wave barWidth must match DockLayoutMath.barSize")
+    expect(rest.hoveredSlotIndex == nil, "Rest wave without cursor must have nil hoveredSlotIndex")
+
+    // 14b. Hovering center of tile #4 creates smooth symmetric cosine bell curve across neighbors #3, #2 and #5, #6
+    let tile4RestCenter = rest.barOriginXInContainer + rest.slots[4].tileOriginX + rest.slots[4].slotWidth * 0.5
+    let midWave = DockLayoutMath.computeWaveLayout(
+        slots: slots,
+        baseIconSize: baseIcon,
+        containerWidth: containerW,
+        cursorXInContainer: tile4RestCenter,
+        envelope: 1.0
+    )
+    expect(midWave.hoveredSlotIndex == 4, "Hovering tile 4 center must report hoveredSlotIndex == 4")
+    expect(midWave.barWidth > rest.barWidth + 24, "Magnified wave must smoothly expand total pill width")
+    expect(midWave.slots[4].iconSize > midWave.slots[3].iconSize, "Center icon must be larger than ±1 neighbor")
+    expect(midWave.slots[3].iconSize > midWave.slots[2].iconSize, "±1 neighbor must be larger than ±2 neighbor")
+    expect(midWave.slots[2].iconSize > baseIcon, "±2 neighbor must still participate gently in cosine wave")
+    expect(abs(midWave.slots[0].iconSize - baseIcon) < 0.01, "Distant icon #0 must remain at baseIconSize")
+
+    // 14c. Focal-point lock: hovering leftmost (#0), middle (#4), or rightmost (#10) tile keeps that tile's center locked under cursor!
+    for targetIdx in [0, 4, 10] {
+        let targetRestCenter = rest.barOriginXInContainer + rest.slots[targetIdx].tileOriginX + rest.slots[targetIdx].slotWidth * 0.5
+        let w = DockLayoutMath.computeWaveLayout(
+            slots: slots,
+            baseIconSize: baseIcon,
+            containerWidth: containerW,
+            cursorXInContainer: targetRestCenter,
+            envelope: 1.0
+        )
+        let renderedCenter = w.barOriginXInContainer + w.slots[targetIdx].tileOriginX + w.slots[targetIdx].slotWidth * 0.5
+        expect(
+            abs(renderedCenter - targetRestCenter) < 0.5,
+            "Focal-point lock failed at slot \(targetIdx): cursor=\(targetRestCenter), renderedCenter=\(renderedCenter)"
+        )
+        expect(w.hoveredSlotIndex == targetIdx, "hoveredSlotIndex must stay locked on slot \(targetIdx)")
+    }
+
+    // 14d. Sweeping pixel-by-pixel across tiles 1..3 never drops hoveredSlotIndex to nil in the 2 pt inter-tile gap
+    let startSweepX = Int(ceil(rest.barOriginXInContainer + rest.slots[1].tileOriginX + 4))
+    let endSweepX = Int(floor(rest.barOriginXInContainer + rest.slots[3].tileOriginX + rest.slots[3].slotWidth - 4))
+    for px in startSweepX...endSweepX {
+        let w = DockLayoutMath.computeWaveLayout(
+            slots: slots,
+            baseIconSize: baseIcon,
+            containerWidth: containerW,
+            cursorXInContainer: CGFloat(px),
+            envelope: 1.0
+        )
+        expect(w.hoveredSlotIndex != nil, "Sweeping at x=\(px) between adjacent tiles must not flicker hoveredSlotIndex to nil")
+    }
+}
+
 @main
 struct TestRunner {
     static func main() {
@@ -450,6 +648,8 @@ struct TestRunner {
         testApplicationClickReopenAndHiddenSemantics()
         testTwinMonitorPersistentDisambiguation()
         testUpdateCheckerAndFeedbackHelpers()
+        testFolderStackSortStyleGeometryAndDirectoryReader()
+        testContinuousCosineWaveMagnificationAndFocalLock()
 
         print("MultiScreenDock Tests: \(passedTests) passed, \(failedTests) failed.")
         if failedTests > 0 {

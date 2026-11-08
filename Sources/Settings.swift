@@ -7,6 +7,13 @@ enum DockVisibilityMode: String {
     case autoHide = "autoHide"
 }
 
+enum FolderStackStylePreference: String, CaseIterable {
+    case dockDefault = "dockDefault"
+    case fan = "fan"
+    case grid = "grid"
+    case list = "list"
+}
+
 enum AppLanguage: String, CaseIterable {
     case system = "system"
     case en = "en"
@@ -96,6 +103,7 @@ final class DockSettings {
         static let appLanguage = "appLanguage"
         static let autoCheckUpdates = "autoCheckUpdates"
         static let lastUpdateCheckTimestamp = "lastUpdateCheckTimestamp"
+        static let folderStackStyle = "folderStackStyle"
     }
 
     var onChange: (() -> Void)?
@@ -117,7 +125,8 @@ final class DockSettings {
             Keys.disabledScreens: [String](),
             Keys.appLanguage: AppLanguage.system.rawValue,
             Keys.autoCheckUpdates: true,
-            Keys.lastUpdateCheckTimestamp: 0.0
+            Keys.lastUpdateCheckTimestamp: 0.0,
+            Keys.folderStackStyle: FolderStackStylePreference.dockDefault.rawValue
         ])
     }
 
@@ -261,6 +270,20 @@ final class DockSettings {
     var lastUpdateCheckTimestamp: TimeInterval {
         get { defaults.double(forKey: Keys.lastUpdateCheckTimestamp) }
         set { defaults.set(newValue, forKey: Keys.lastUpdateCheckTimestamp) }
+    }
+
+    var folderStackStyle: FolderStackStylePreference {
+        get {
+            guard let raw = defaults.string(forKey: Keys.folderStackStyle),
+                  let val = FolderStackStylePreference(rawValue: raw) else {
+                return .dockDefault
+            }
+            return val
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Keys.folderStackStyle)
+            onChange?()
+        }
     }
 
     func displayID(for screen: NSScreen) -> CGDirectDisplayID? {

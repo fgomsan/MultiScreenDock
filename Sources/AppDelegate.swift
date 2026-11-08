@@ -244,6 +244,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sizeParent.submenu = sizeSubmenu
         menu.addItem(sizeParent)
 
+        // Folder Stack Style Submenu
+        let stackStyleSubmenu = NSMenu()
+        let stackChoices: [(String, FolderStackStylePreference)] = [
+            (L10n.stackStyleDockDefault, .dockDefault),
+            (L10n.stackStyleFan, .fan),
+            (L10n.stackStyleGrid, .grid),
+            (L10n.stackStyleList, .list)
+        ]
+        for (title, pref) in stackChoices {
+            let stItem = NSMenuItem(title: title, action: #selector(selectFolderStackStyle(_:)), keyEquivalent: "")
+            stItem.target = self
+            stItem.representedObject = pref.rawValue
+            stItem.state = (settings.folderStackStyle == pref) ? .on : .off
+            stackStyleSubmenu.addItem(stItem)
+        }
+        let stackStyleParent = NSMenuItem(title: L10n.stackStyleMenu, action: nil, keyEquivalent: "")
+        stackStyleParent.submenu = stackStyleSubmenu
+        menu.addItem(stackStyleParent)
+
         // Displays Submenu
         let screensSubmenu = NSMenu()
         let screens = NSScreen.screens
@@ -396,6 +415,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func selectIconSize(_ sender: NSMenuItem) {
         if let val = sender.representedObject as? CGFloat {
             DockSettings.shared.iconSize = val
+        }
+    }
+
+    @objc private func selectFolderStackStyle(_ sender: NSMenuItem) {
+        if let raw = sender.representedObject as? String,
+           let pref = FolderStackStylePreference(rawValue: raw) {
+            DockSettings.shared.folderStackStyle = pref
         }
     }
 

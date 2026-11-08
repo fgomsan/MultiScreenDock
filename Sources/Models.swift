@@ -1,9 +1,47 @@
 import Cocoa
 
+enum DockStackSortOrder: Int, Equatable {
+    case name = 1
+    case dateAdded = 2
+    case dateModified = 3
+    case dateCreated = 4
+    case kind = 5
+}
+
+enum DockStackStyle: Int, Equatable {
+    case automatic = 0
+    case fan = 1
+    case grid = 2
+    case list = 3
+}
+
+struct DockFolderStackConfig: Equatable {
+    let sortOrder: DockStackSortOrder
+    let style: DockStackStyle
+    let displayAsStack: Bool
+
+    static func parse(from tileData: [String: Any], folderURL: URL) -> DockFolderStackConfig {
+        let isDownloads = folderURL.standardizedFileURL.lastPathComponent.lowercased() == "downloads"
+        let defaultSort: DockStackSortOrder = isDownloads ? .dateAdded : .name
+        let rawSort = (tileData["arrangement"] as? Int) ?? defaultSort.rawValue
+        let sortOrder = DockStackSortOrder(rawValue: rawSort) ?? defaultSort
+
+        let rawStyle = (tileData["showas"] as? Int) ?? 0
+        let style = DockStackStyle(rawValue: rawStyle) ?? .automatic
+
+        let rawDisplayAs = (tileData["displayas"] as? Int) ?? (isDownloads ? 0 : 1)
+        return DockFolderStackConfig(
+            sortOrder: sortOrder,
+            style: style,
+            displayAsStack: rawDisplayAs == 0
+        )
+    }
+}
+
 enum DockItemKind: Equatable {
     case finder
     case application(bundleID: String?, url: URL)
-    case directoryOrFile(url: URL, isDirectory: Bool)
+    case directoryOrFile(url: URL, isDirectory: Bool, stackConfig: DockFolderStackConfig? = nil)
     case separator
     case trash(isFull: Bool)
 }
@@ -100,7 +138,7 @@ final class DockModelReader {
     private var lastTrashModDate: Date?
     private var cachedTrashNonEmpty: Bool?
     private var cachedPersistentApps: [(label: String, bundleID: String?, url: URL)] = []
-    private var cachedPersistentOthers: [(label: String, url: URL, isDirectory: Bool)] = []
+    private var cachedPersistentOthers: [(label: String, url: URL, isDirectory: Bool, stackConfig: DockFolderStackConfig?)] = []
     private var cachedTrashFullFromPlist: Bool = false
 
     private let dockPlistURL: URL = {
@@ -196,7 +234,7 @@ final class DockModelReader {
         }
         cachedPersistentApps = appsResult
 
-        var othersResult: [(label: String, url: URL, isDirectory: Bool)] = []
+        var othersResult: [(label: String, url: URL, isDirectory: Bool, stackConfig: DockFolderStackConfig?)] = []
         if let rawOthers = plist["persistent-others"] as? [[String: Any]] {
             for entry in rawOthers {
                 let tileType = entry["tile-type"] as? String ?? "file-tile"
@@ -215,8 +253,14 @@ final class DockModelReader {
                 guard let fileURL = resolvedOtherURL else { continue }
                 var isDir: ObjCBool = false
                 FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDir)
+                // Treat macOS bundles (.app, .rtfd, .pages, etc.) as files rather than expandable folders
+                let isPackage = (try? fileURL.resourceValues(forKeys: [.isPackageKey]).isPackage) ?? false
+                let isExpandableDirectory = isDir.boolValue && !isPackage
+                let stackCfg = isExpandableDirectory
+                    ? DockFolderStackConfig.parse(from: tileData, folderURL: fileURL)
+                    : nil
                 let label = (tileData["file-label"] as? String) ?? fileURL.lastPathComponent
-                othersResult.append((label: label, url: fileURL, isDirectory: isDir.boolValue))
+                othersResult.append((label: label, url: fileURL, isDirectory: isExpandableDirectory, stackConfig: stackCfg))
             }
         }
         cachedPersistentOthers = othersResult
@@ -357,7 +401,7 @@ final class DockModelReader {
             items.append(DockItem(
                 id: "other-\(other.url.path)-\(idx)",
                 label: other.label,
-                kind: .directoryOrFile(url: other.url, isDirectory: other.isDirectory),
+                kind: .directoryOrFile(url: other.url, isDirectory: other.isDirectory, stackConfig: other.stackConfig),
                 icon: iconForFile(other.url.path),
                 isRunning: false,
                 isFrontmost: false

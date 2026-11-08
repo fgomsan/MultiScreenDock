@@ -43,7 +43,7 @@ brew install --cask multiscreendock
 
 ### Download a release
 
-1. Download [`MultiScreenDock-v1.3.5-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.3.5/MultiScreenDock-v1.3.5-macOS.zip) from the [latest release](https://github.com/fgomsan/MultiScreenDock/releases/latest).
+1. Download [`MultiScreenDock-v1.4.0-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.4.0/MultiScreenDock-v1.4.0-macOS.zip) from the [latest release](https://github.com/fgomsan/MultiScreenDock/releases/latest).
 2. Unzip it, move `MultiScreenDock.app` to `/Applications`, and open it.
 3. Official releases (`v1.3.2+`) are signed with an Apple **Developer ID Application** certificate (`G387RJ72S5`) and **notarized by Apple**, so macOS Gatekeeper opens them directly without warnings.
 
@@ -180,7 +180,7 @@ brew tap fgomsan/tap
 brew install --cask multiscreendock
 ```
 
-O descarga [`MultiScreenDock-v1.3.5-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.3.5/MultiScreenDock-v1.3.5-macOS.zip), descomprímela, mueve `MultiScreenDock.app` a `/Applications` y ábrela directamente (firmada con Apple Developer ID y notarizada por Apple, sin avisos de Gatekeeper). Para compilar desde código fuente y ejecutar los tests: `./Tests/run_tests.sh && ./build.sh` en macOS 13 o posterior.
+O descarga [`MultiScreenDock-v1.4.0-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.4.0/MultiScreenDock-v1.4.0-macOS.zip), descomprímela, mueve `MultiScreenDock.app` a `/Applications` y ábrela directamente (firmada con Apple Developer ID y notarizada por Apple, sin avisos de Gatekeeper). Para compilar desde código fuente y ejecutar los tests: `./Tests/run_tests.sh && ./build.sh` en macOS 13 o posterior.
 
 **Permisos.** No pide Accesibilidad ni Grabación de Pantalla. macOS pedirá permiso de Automatización al controlar el Finder (clic en el icono de Finder, ventana nueva, vaciar la Papelera) o System Events (ocultar automáticamente el Dock del sistema). Si rechazas System Events, ofrece abrir Ajustes del Sistema o confirmar explícitamente el reinicio del Dock.
 

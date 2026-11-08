@@ -251,7 +251,7 @@ final class StackThumbnailProvider {
 
 // MARK: - Interactive Item Tile / Row Supporting Click, ⌘-Click, and File Drag-Out
 
-private class DraggableStackItemControl: NSView, NSDraggingSource {
+final class DraggableStackItemControl: NSView, NSDraggingSource {
     let entry: FolderStackEntry?
     var onActivate: ((NSEvent.ModifierFlags) -> Void)?
 
@@ -273,6 +273,14 @@ private class DraggableStackItemControl: NSView, NSDraggingSource {
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
+    }
+
+    /// Always return `self` rather than internal `NSImageView` / `NSTextField` / `NSVisualEffectView` subviews,
+    /// ensuring `acceptsFirstMouse == true` on non-activating panels and preventing `NSControl` cell tracking
+    /// from swallowing `mouseDragged` events when dragging by the icon or filename pill.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        guard !isHidden, alphaValue > 0.01 else { return nil }
+        return frame.contains(point) ? self : nil
     }
 
     override func updateTrackingAreas() {
@@ -299,9 +307,47 @@ private class DraggableStackItemControl: NSView, NSDraggingSource {
     }
 
     override func mouseDown(with event: NSEvent) {
-        mouseDownPoint = convert(event.locationInWindow, from: nil)
+        if event.modifierFlags.contains(.control) {
+            super.mouseDown(with: event)
+            return
+        }
+        guard let win = window else { return }
+
+        let start = convert(event.locationInWindow, from: nil)
+        mouseDownPoint = start
         mouseDownEvent = event
         didStartDrag = false
+
+        while true {
+            guard let next = win.nextEvent(
+                matching: [.leftMouseDragged, .leftMouseUp],
+                until: .distantFuture,
+                inMode: .eventTracking,
+                dequeue: true
+            ) else { break }
+
+            let cur = convert(next.locationInWindow, from: nil)
+
+            if next.type == .leftMouseUp {
+                if !didStartDrag && bounds.contains(cur) {
+                    onActivate?(next.modifierFlags)
+                }
+                mouseDownPoint = nil
+                mouseDownEvent = nil
+                break
+            }
+
+            if next.type == .leftMouseDragged, let entry = entry {
+                let dist = hypot(cur.x - start.x, cur.y - start.y)
+                if dist >= 4.0 {
+                    didStartDrag = true
+                    mouseDownPoint = nil
+                    mouseDownEvent = nil
+                    initiateFileDragSession(for: entry, initialEvent: event, anchorInSelf: start)
+                    break
+                }
+            }
+        }
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -310,21 +356,13 @@ private class DraggableStackItemControl: NSView, NSDraggingSource {
               let start = mouseDownPoint else { return }
         let cur = convert(event.locationInWindow, from: nil)
         let dist = hypot(cur.x - start.x, cur.y - start.y)
-        guard dist >= 4.5 else { return }
+        guard dist >= 4.0 else { return }
 
         didStartDrag = true
-        let pasteboardItem = NSPasteboardItem()
-        pasteboardItem.setString(entry.url.absoluteString, forType: .fileURL)
-        let dragItem = NSDraggingItem(pasteboardWriter: entry.url as NSURL)
-        let icon = StackThumbnailProvider.shared.immediateIcon(for: entry)
-        let dragSize = NSSize(width: 48, height: 48)
-        let dragOrigin = NSPoint(x: cur.x - 24, y: cur.y - 24)
-        dragItem.setDraggingFrame(NSRect(origin: dragOrigin, size: dragSize), contents: icon)
-
-        beginDraggingSession(with: [dragItem], event: mouseDownEvent ?? event, source: self)
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-            FolderStackController.shared.dismiss(animated: false)
-        }
+        let initial = mouseDownEvent ?? event
+        mouseDownPoint = nil
+        mouseDownEvent = nil
+        initiateFileDragSession(for: entry, initialEvent: initial, anchorInSelf: start)
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -339,18 +377,43 @@ private class DraggableStackItemControl: NSView, NSDraggingSource {
         }
     }
 
+    private func initiateFileDragSession(for entry: FolderStackEntry, initialEvent: NSEvent, anchorInSelf: NSPoint) {
+        let fileURL = entry.url.standardizedFileURL
+        let dragItem = NSDraggingItem(pasteboardWriter: fileURL as NSURL)
+        let icon = StackThumbnailProvider.shared.immediateIcon(for: entry)
+        let side = max(16.0, min(48.0, min(bounds.width, bounds.height)))
+        let clampedX = min(max(0.0, anchorInSelf.x - side * 0.5), max(0.0, bounds.width - side))
+        let clampedY = min(max(0.0, anchorInSelf.y - side * 0.5), max(0.0, bounds.height - side))
+        let dragFrame = NSRect(x: clampedX, y: clampedY, width: side, height: side)
+        dragItem.setDraggingFrame(dragFrame, contents: icon)
+
+        onHoverChange?(false)
+        FolderStackController.shared.prepareForOutgoingFileDrag()
+        let session = beginDraggingSession(with: [dragItem], event: initialEvent, source: self)
+        session.animatesToStartingPositionsOnCancelOrFail = true
+    }
+
     func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
         context == .withinApplication ? .generic : [.copy, .move, .link, .generic]
+    }
+
+    func draggingSession(_ session: NSDraggingSession, willBeginAt screenPoint: NSPoint) {
+        FolderStackController.shared.didBeginOutgoingFileDrag()
+    }
+
+    func draggingSession(_ session: NSDraggingSession, endedAt screenPoint: NSPoint, operation: NSDragOperation) {
+        FolderStackController.shared.didEndOutgoingFileDrag()
     }
 }
 
 // MARK: - Fan Pass-Through Root View (Clicks on Empty Space Dismiss Cleanly)
 
-private final class FanPassthroughRootView: NSView {
+final class FanPassthroughRootView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? {
+        let localPoint = superview != nil ? convert(point, from: superview) : point
+        guard bounds.contains(localPoint) else { return nil }
         for sub in subviews.reversed() {
-            let pt = convert(point, to: sub)
-            if sub.bounds.contains(pt), let hit = sub.hitTest(pt) {
+            if let hit = sub.hitTest(localPoint) {
                 return hit
             }
         }
@@ -391,6 +454,12 @@ final class FolderStackPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
+    func hitInteractiveView(atWindowPoint winPt: NSPoint) -> NSView? {
+        guard let root = contentView else { return nil }
+        let ptInRootSuper = root.superview != nil ? root.superview!.convert(winPt, from: nil) : winPt
+        return root.hitTest(ptInRootSuper)
+    }
+
     override func cancelOperation(_ sender: Any?) {
         onEscapePressed?()
     }
@@ -417,6 +486,8 @@ final class FolderStackController {
     private var currentAnchorScreenRect: NSRect = .zero
     private weak var currentScreen: NSScreen?
     private var sessionStyleOverride: DockStackStyle?
+    private(set) var isDraggingFile = false
+    private var didConfirmDragSessionStart = false
 
     private var globalMouseMonitor: Any?
     private var localMouseMonitor: Any?
@@ -425,12 +496,49 @@ final class FolderStackController {
     private init() {}
 
     var isVisible: Bool {
-        panel?.isVisible == true
+        panel?.isVisible == true && !isDraggingFile
     }
 
     func isPresented(for folderURL: URL, on barPanel: DockBarPanel?) -> Bool {
         guard isVisible else { return false }
         return rootFolderURL?.standardizedFileURL == folderURL.standardizedFileURL && activeBarPanel === barPanel
+    }
+
+    /// Keeps `panel` and its `DraggableStackItemControl` (`NSDraggingSource`) alive in memory and attached
+    /// to a valid `NSWindow` for the full duration of a cross-monitor drag, while fading the stack out
+    /// and making it mouse-transparent so any window underneath can accept the drop.
+    func prepareForOutgoingFileDrag() {
+        isDraggingFile = true
+        didConfirmDragSessionStart = false
+        removeClickOutsideMonitors()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
+            guard let self = self, self.isDraggingFile, !self.didConfirmDragSessionStart else { return }
+            // Safety recovery if AppKit aborted drag startup before `willBeginAt`
+            self.isDraggingFile = false
+            self.dismiss(animated: false)
+        }
+    }
+
+    func didBeginOutgoingFileDrag() {
+        isDraggingFile = true
+        didConfirmDragSessionStart = true
+        guard let stackWin = panel else { return }
+        stackWin.ignoresMouseEvents = true
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.10
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            stackWin.animator().alphaValue = 0.0
+        }
+    }
+
+    func didEndOutgoingFileDrag() {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.isDraggingFile = false
+            self.didConfirmDragSessionStart = false
+            self.dismiss(animated: false)
+        }
     }
 
     func toggleOrPresent(
@@ -474,6 +582,7 @@ final class FolderStackController {
     }
 
     func dismiss(animated: Bool) {
+        guard !isDraggingFile else { return }
         removeClickOutsideMonitors()
         if let bar = activeBarPanel {
             bar.isFolderStackOpen = false
@@ -1145,6 +1254,7 @@ final class FolderStackController {
 
     private func showInPanel(rootView: NSView, frame: NSRect, animated: Bool) {
         if let existing = panel {
+            existing.ignoresMouseEvents = false
             existing.contentView = rootView
             existing.setFrame(frame, display: true, animate: false)
             existing.alphaValue = 1.0
@@ -1236,11 +1346,10 @@ final class FolderStackController {
         }
 
         localMouseMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
-            guard let self = self, let stackWin = self.panel else { return event }
+            guard let self = self, !self.isDraggingFile, let stackWin = self.panel else { return event }
             if event.window === stackWin {
                 // In Fan mode, clicking transparent empty area where hitTest == nil should dismiss immediately
-                if let root = stackWin.contentView,
-                   root.hitTest(event.locationInWindow) == nil {
+                if stackWin.hitInteractiveView(atWindowPoint: event.locationInWindow) == nil {
                     self.dismiss(animated: true)
                 }
                 return event
@@ -1255,14 +1364,12 @@ final class FolderStackController {
     }
 
     private func handlePotentialOutsideClick() {
-        guard let stackWin = panel, stackWin.isVisible else { return }
+        guard !isDraggingFile, let stackWin = panel, stackWin.isVisible else { return }
         let pt = NSEvent.mouseLocation
         if stackWin.frame.contains(pt) {
-            if let root = stackWin.contentView {
-                let winPt = stackWin.convertPoint(fromScreen: pt)
-                if root.hitTest(winPt) != nil {
-                    return
-                }
+            let winPt = stackWin.convertPoint(fromScreen: pt)
+            if stackWin.hitInteractiveView(atWindowPoint: winPt) != nil {
+                return
             }
         }
         dismiss(animated: true)

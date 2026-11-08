@@ -633,6 +633,113 @@ func testContinuousCosineWaveMagnificationAndFocalLock() {
     }
 }
 
+// 15. Fan & Card Folder Stack hit-testing, first-mouse acceptance & drag-out lifecycle on upper stacked monitors
+func testFanStackHitTestingFirstMouseAndDragLifecycleOnStackedMonitors() {
+    let upperScreenFrame = NSRect(x: -1632, y: 1117, width: 2560, height: 1440)
+    let anchorMidX: CGFloat = -210
+    let baseY: CGFloat = 1188
+    let iconSize: CGFloat = 50
+    let rowCount = 9 // 8 files + 1 top cap
+
+    let centers = FolderStackEngine.computeFanIconCenters(
+        rowCount: rowCount,
+        anchorMidX: anchorMidX,
+        baseY: baseY,
+        screenMinX: upperScreenFrame.minX,
+        screenMaxX: upperScreenFrame.maxX,
+        iconSize: iconSize
+    )
+    expect(centers.count == rowCount, "Fan centers count must match rowCount")
+
+    var unionRect = NSRect.null
+    let maxPillW: CGFloat = 230
+    let rowHeight: CGFloat = 54
+    for c in centers {
+        let rowRect = NSRect(
+            x: c.x - iconSize / 2 - maxPillW - 16,
+            y: c.y - rowHeight / 2,
+            width: maxPillW + 16 + iconSize + 16,
+            height: rowHeight
+        )
+        unionRect = unionRect.union(rowRect)
+    }
+    unionRect = unionRect.insetBy(dx: -12, dy: -12)
+
+    let root = FanPassthroughRootView(frame: NSRect(origin: .zero, size: unionRect.size))
+    var controls: [DraggableStackItemControl] = []
+
+    for (idx, center) in centers.enumerated() {
+        let localCenter = NSPoint(x: center.x - unionRect.minX, y: center.y - unionRect.minY)
+        let pillWidth: CGFloat = idx % 2 == 0 ? 150 : 92
+        let gap: CGFloat = 10
+        let totalW = pillWidth + gap + iconSize + 8
+        let totalH = iconSize + 8
+        let rowOrigin = NSPoint(
+            x: round(localIconCenterX(localCenter.x, iconSize: iconSize, gap: gap, pillWidth: pillWidth)),
+            y: round(localCenter.y - totalH / 2)
+        )
+        let entry = FolderStackEntry(
+            url: URL(fileURLWithPath: "/tmp/doc-\(idx).pdf"),
+            displayName: "doc-\(idx).pdf",
+            isSubfolder: false,
+            dateAdded: Date(),
+            dateModified: Date(),
+            dateCreated: Date(),
+            kindDescription: "PDF",
+            fileSize: 1024
+        )
+        let ctrl = DraggableStackItemControl(entry: entry, frame: NSRect(origin: rowOrigin, size: NSSize(width: totalW, height: totalH)))
+        let pill = NSVisualEffectView(frame: NSRect(x: 0, y: 17, width: pillWidth, height: 24))
+        let lbl = NSTextField(labelWithString: entry.displayName)
+        lbl.frame = NSRect(x: 10, y: 4, width: pillWidth - 20, height: 16)
+        pill.addSubview(lbl)
+        ctrl.addSubview(pill)
+        let img = NSImageView(frame: NSRect(x: pillWidth + gap, y: 4, width: iconSize, height: iconSize))
+        ctrl.addSubview(img)
+
+        root.addSubview(ctrl)
+        controls.append(ctrl)
+    }
+
+    let stackPanel = FolderStackPanel(contentRect: unionRect)
+    stackPanel.contentView = root
+
+    for (idx, ctrl) in controls.enumerated() {
+        // Test hit on icon center and hit on pill label center for every row (0..8)
+        let iconPtInWin = NSPoint(x: ctrl.frame.maxX - 28, y: ctrl.frame.midY)
+        let pillPtInWin = NSPoint(x: ctrl.frame.minX + 24, y: ctrl.frame.midY)
+
+        let hitIcon = stackPanel.hitInteractiveView(atWindowPoint: iconPtInWin)
+        let hitPill = stackPanel.hitInteractiveView(atWindowPoint: pillPtInWin)
+
+        expect(hitIcon === ctrl, "Fan row \(idx) icon hitTest must return DraggableStackItemControl itself, got \(String(describing: hitIcon))")
+        expect(hitPill === ctrl, "Fan row \(idx) pill hitTest must return DraggableStackItemControl itself, got \(String(describing: hitPill))")
+        expect(hitIcon?.acceptsFirstMouse(for: nil) == true, "Fan row \(idx) icon hit must accept first mouse on non-activating panel")
+
+        // Empty transparent space well to the left of short pills must pass through (nil)
+        if ctrl.frame.minX > 20 {
+            let emptyLeftPt = NSPoint(x: 6, y: ctrl.frame.midY)
+            expect(stackPanel.hitInteractiveView(atWindowPoint: emptyLeftPt) == nil, "Transparent empty space left of row \(idx) must return nil")
+        }
+    }
+    stackPanel.close()
+
+    // Drag lifecycle state protection: dismiss(animated:) is suppressed while a cross-monitor file drag is active
+    let controller = FolderStackController.shared
+    controller.prepareForOutgoingFileDrag()
+    controller.didBeginOutgoingFileDrag()
+    expect(controller.isDraggingFile == true, "isDraggingFile must be true during active outgoing drag")
+    controller.dismiss(animated: false)
+    expect(controller.isDraggingFile == true, "External dismiss must not abort active outgoing drag before endedAt")
+    controller.didEndOutgoingFileDrag()
+    RunLoop.main.run(until: Date().addingTimeInterval(0.03))
+    expect(controller.isDraggingFile == false, "didEndOutgoingFileDrag must cleanly reset isDraggingFile")
+}
+
+private func localIconCenterX(_ cx: CGFloat, iconSize: CGFloat, gap: CGFloat, pillWidth: CGFloat) -> CGFloat {
+    cx - iconSize / 2 - gap - pillWidth
+}
+
 @main
 struct TestRunner {
     static func main() {
@@ -650,6 +757,7 @@ struct TestRunner {
         testUpdateCheckerAndFeedbackHelpers()
         testFolderStackSortStyleGeometryAndDirectoryReader()
         testContinuousCosineWaveMagnificationAndFocalLock()
+        testFanStackHitTestingFirstMouseAndDragLifecycleOnStackedMonitors()
 
         print("MultiScreenDock Tests: \(passedTests) passed, \(failedTests) failed.")
         if failedTests > 0 {

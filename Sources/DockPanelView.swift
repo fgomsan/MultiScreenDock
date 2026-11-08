@@ -596,7 +596,7 @@ final class DockTileView: NSView {
             title: item.label,
             dockConfig: stackConfig,
             anchorScreenRect: anchorScreenRect,
-            on: barPanel.screen,
+            on: barPanel.assignedScreen ?? barPanel.screen,
             barPanel: barPanel
         )
     }
@@ -1229,6 +1229,7 @@ final class DockBarPanel: NSPanel {
     var isContextMenuOpen = false
     var isFolderStackOpen = false
     var hasActivePopup: Bool { isContextMenuOpen || isFolderStackOpen }
+    private(set) weak var assignedScreen: NSScreen?
     private(set) var isRevealed = false
     private var animationToken: Int = 0
 
@@ -1256,6 +1257,7 @@ final class DockBarPanel: NSPanel {
     private var activeHoverLocalMonitor: Any?
 
     init(screen: NSScreen) {
+        self.assignedScreen = screen
         super.init(
             contentRect: NSRect(x: screen.frame.midX - 200, y: screen.frame.minY, width: 400, height: 80),
             styleMask: [.borderless, .nonactivatingPanel],
@@ -1341,6 +1343,7 @@ final class DockBarPanel: NSPanel {
     }
 
     func updateContentAndGeometry(items: [DockItem], on screen: NSScreen, forceLayout: Bool = false) {
+        assignedScreen = screen
         applyCollectionBehavior()
 
         let preferredSize = DockSettings.shared.iconSize
@@ -1623,7 +1626,7 @@ final class DockBarPanel: NSPanel {
     }
 
     func conceal(animated: Bool, onConcealed: (() -> Void)? = nil) {
-        if isFolderStackOpen {
+        if isFolderStackOpen && !FolderStackController.shared.isDraggingFile {
             FolderStackController.shared.dismiss(animated: false)
         }
         guard isRevealed || isVisible else {

@@ -14,6 +14,12 @@
 
 ![MultiScreenDock mostrando el Dock en todos los monitores](docs/demo.gif)
 
+<p align="center">
+  <img src="docs/real-setup-5-monitors.jpg" alt="Real 5-monitor stacked macOS desk (2x LG UltraFine upper row + MacBook Pro 16 + 2x ARZOPA lower row)" width="860" />
+  <br />
+  <em>The 5-display stacked macOS desk MultiScreenDock was built for: 2× LG UltraFine (upper row) above a 16" MacBook Pro flanked by 2× ARZOPA portable displays (lower row).</em>
+</p>
+
 ## Features
 
 - **Two visibility modes.** Auto-hide, revealed by dwelling at the bottom edge, or always visible. On a display with another monitor directly underneath, the dwell is longer (90 / 150 / 250 ms instead of 40 / 80 / 160 ms) so a fast vertical crossing does not pop the bar. An optional pill marks the bottom center while the bar is hidden.

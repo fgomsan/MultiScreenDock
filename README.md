@@ -22,7 +22,7 @@
 
 ## Features
 
-- **Two visibility modes.** Auto-hide, revealed by dwelling at the bottom edge, or always visible. On a display with another monitor directly underneath, the dwell is longer (90 / 150 / 250 ms instead of 40 / 80 / 160 ms) so a fast vertical crossing does not pop the bar. An optional pill marks the bottom center while the bar is hidden.
+- **Three visibility modes.** Auto-hide (revealed by dwelling at the bottom edge), **Smart auto-hide** (stays visible when the bottom of a display is clear, and automatically hides per-monitor only when a window overlaps the Dock area — using public `CGWindowListCopyWindowInfo` geometry with zero Accessibility or Screen Recording permissions), or always visible. On a display with another monitor directly underneath, the dwell is longer (90 / 150 / 250 ms instead of 40 / 80 / 160 ms) so a fast vertical crossing does not pop the bar. An optional pill marks the bottom center while the bar is hidden.
 - **The same items as your Dock.** Finder, pinned apps, running apps that are not pinned (with a dot, brighter for the frontmost app), pinned files and folders, and the Trash. Spacers in `com.apple.dock.plist` are skipped. Icons refresh from that plist, from `NSWorkspace` launch/quit/activate notifications, and from **Sync Dock Icons Now**.
 - **Stays out of the system Dock's way.** The primary display is skipped by default. On any display where the system Dock is currently taking bottom space, the extra bar hides while **Avoid overlapping where native Dock is visible** is on.
 - **Settings where your hand already is.** Right-click the bar, Control-click it, or open **MultiScreenDock Settings** at the bottom of an icon's menu. The same menu is on the menu-bar icon (`dock.rectangle`, or the title "Dock+" if that symbol is missing). Per-display toggles, icon size (28 / 36 / 44 / 52 pt, scaled down to fit a narrow screen, floor 20 pt or 14 pt in extreme overflow), hover magnification, and launch at login live there.
@@ -49,7 +49,7 @@ brew install --cask multiscreendock
 
 ### Download a release
 
-1. Download [`MultiScreenDock-v1.4.1-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.4.1/MultiScreenDock-v1.4.1-macOS.zip) from the [latest release](https://github.com/fgomsan/MultiScreenDock/releases/latest).
+1. Download [`MultiScreenDock-v1.4.2-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.4.2/MultiScreenDock-v1.4.2-macOS.zip) from the [latest release](https://github.com/fgomsan/MultiScreenDock/releases/latest).
 2. Unzip it, move `MultiScreenDock.app` to `/Applications`, and open it.
 3. Official releases (`v1.3.2+`) are signed with an Apple **Developer ID Application** certificate (`G387RJ72S5`) and **notarized by Apple**, so macOS Gatekeeper opens them directly without warnings.
 
@@ -186,7 +186,7 @@ brew tap fgomsan/tap
 brew install --cask multiscreendock
 ```
 
-O descarga [`MultiScreenDock-v1.4.1-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.4.1/MultiScreenDock-v1.4.1-macOS.zip), descomprímela, mueve `MultiScreenDock.app` a `/Applications` y ábrela directamente (firmada con Apple Developer ID y notarizada por Apple, sin avisos de Gatekeeper). Para compilar desde código fuente y ejecutar los tests: `./Tests/run_tests.sh && ./build.sh` en macOS 13 o posterior.
+O descarga [`MultiScreenDock-v1.4.2-macOS.zip`](https://github.com/fgomsan/MultiScreenDock/releases/download/v1.4.2/MultiScreenDock-v1.4.2-macOS.zip), descomprímela, mueve `MultiScreenDock.app` a `/Applications` y ábrela directamente (firmada con Apple Developer ID y notarizada por Apple, sin avisos de Gatekeeper). Para compilar desde código fuente y ejecutar los tests: `./Tests/run_tests.sh && ./build.sh` en macOS 13 o posterior.
 
 **Permisos.** No pide Accesibilidad ni Grabación de Pantalla. macOS pedirá permiso de Automatización al controlar el Finder (clic en el icono de Finder, ventana nueva, vaciar la Papelera) o System Events (ocultar automáticamente el Dock del sistema). Si rechazas System Events, ofrece abrir Ajustes del Sistema o confirmar explícitamente el reinicio del Dock.
 

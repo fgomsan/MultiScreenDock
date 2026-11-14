@@ -1,5 +1,59 @@
 import Cocoa
 
+enum DockWindowOverlapDetector {
+    private static let ignoredOwnerNames: Set<String> = [
+        "Window Server",
+        "Dock",
+        "Control Center",
+        "NotificationCenter",
+        "Notification Center",
+        "SystemUIServer",
+        "Spotlight",
+        "loginwindow",
+        "Wallpaper"
+    ]
+
+    /// Queries on-screen standard application windows (layer 0) using public CoreGraphics metadata
+    /// (`CGWindowListCopyWindowInfo`, which requires zero Accessibility or Screen Recording permissions)
+    /// and converts their bounds into AppKit global screen coordinates.
+    static func currentStandardWindowRectsInAppKit(screens: [NSScreen] = NSScreen.screens) -> [NSRect] {
+        guard let primary = screens.first else { return [] }
+        let primaryHeight = primary.frame.height
+        let ownPID = ProcessInfo.processInfo.processIdentifier
+
+        guard let infoList = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements],
+            kCGNullWindowID
+        ) as? [[String: Any]] else {
+            return []
+        }
+
+        var rects: [NSRect] = []
+        rects.reserveCapacity(16)
+
+        for entry in infoList {
+            guard let layer = entry[kCGWindowLayer as String] as? Int, layer == 0 else { continue }
+            if let pid = entry[kCGWindowOwnerPID as String] as? pid_t, pid == ownPID { continue }
+            if let alpha = entry[kCGWindowAlpha as String] as? Double, alpha <= 0.05 { continue }
+            if let onScreen = entry[kCGWindowIsOnscreen as String] as? Bool, !onScreen { continue }
+            if let ownerName = entry[kCGWindowOwnerName as String] as? String,
+               ignoredOwnerNames.contains(ownerName) {
+                continue
+            }
+            guard let boundsDict = entry[kCGWindowBounds as String] as? NSDictionary,
+                  let cgRect = CGRect(dictionaryRepresentation: boundsDict),
+                  cgRect.width >= 80,
+                  cgRect.height >= 60 else {
+                continue
+            }
+            let appKitRect = DockLayoutMath.quartzRectToAppKit(cgRect, primaryScreenHeight: primaryHeight)
+            rects.append(appKitRect)
+        }
+
+        return rects
+    }
+}
+
 final class MultiScreenController {
     static let shared = MultiScreenController()
 
@@ -12,6 +66,7 @@ final class MultiScreenController {
     private var panelsByScreenKey: [String: DockBarPanel] = [:]
     private var hintsByScreenKey: [String: EdgeHintPanel] = [:]
     private var cachedAutoHideScreens: [ScreenAutoHideContext] = []
+    private var smartOverlappedScreenKeys: Set<String> = []
 
     private var revealWorkItems: [String: DispatchWorkItem] = [:]
     private var hideWorkItems: [String: DispatchWorkItem] = [:]
@@ -83,8 +138,19 @@ final class MultiScreenController {
         }
     }
 
+    private func isScreenAutoHiding(key: String) -> Bool {
+        switch DockSettings.shared.visibilityMode {
+        case .alwaysVisible:
+            return false
+        case .autoHide:
+            return true
+        case .smartAutoHide:
+            return smartOverlappedScreenKeys.contains(key)
+        }
+    }
+
     private func throttledMouseCheck() {
-        guard DockSettings.shared.visibilityMode == .autoHide else { return }
+        guard !cachedAutoHideScreens.isEmpty else { return }
         let now = CFAbsoluteTimeGetCurrent()
         let elapsed = now - lastMouseEvalTime
         if elapsed < 0.016 {
@@ -122,9 +188,36 @@ final class MultiScreenController {
         if plistChanged || sig != lastNativeInsetsSignature {
             lastNativeInsetsSignature = sig
             refreshAll(forceLayout: plistChanged)
-        } else if DockSettings.shared.visibilityMode == .autoHide && !cachedAutoHideScreens.isEmpty {
+            return
+        }
+
+        let mode = DockSettings.shared.visibilityMode
+        if mode == .smartAutoHide {
+            let currentOverlapped = computeCurrentSmartOverlappedKeys()
+            if currentOverlapped != smartOverlappedScreenKeys {
+                refreshAll(forceLayout: false)
+                return
+            }
+        }
+
+        if !cachedAutoHideScreens.isEmpty {
             evaluateAutoHideState(at: NSEvent.mouseLocation)
         }
+    }
+
+    private func computeCurrentSmartOverlappedKeys(screens: [NSScreen] = NSScreen.screens) -> Set<String> {
+        let settings = DockSettings.shared
+        let windowRects = DockWindowOverlapDetector.currentStandardWindowRectsInAppKit(screens: screens)
+        guard !windowRects.isEmpty else { return [] }
+        var overlapped = Set<String>()
+        for screen in screens where settings.isScreenEnabled(screen) {
+            let key = settings.runtimeScreenKey(for: screen)
+            guard let panel = panelsByScreenKey[key] else { continue }
+            if DockLayoutMath.doesAnyWindowOverlapDock(dockZone: panel.dodgeZone(on: screen), windowRectsInAppKit: windowRects) {
+                overlapped.insert(key)
+            }
+        }
+        return overlapped
     }
 
     private func computeNativeInsetsSignature() -> String {
@@ -185,11 +278,6 @@ final class MultiScreenController {
         let activeKeys = Set(plans.map { $0.key })
         let eligiblePlans = plans.filter { $0.eligible }
 
-        cachedAutoHideScreens = (mode == .autoHide)
-            ? eligiblePlans.map { ScreenAutoHideContext(screen: $0.screen, runtimeKey: $0.key, hasBelow: $0.hasBelow) }
-            : []
-        syncMouseMonitors(shouldListen: mode == .autoHide && !eligiblePlans.isEmpty)
-
         // Only enumerate Dock items & running apps when at least one display will actually render a bar
         let items: [DockItem] = eligiblePlans.isEmpty
             ? []
@@ -215,16 +303,34 @@ final class MultiScreenController {
                 panelsByScreenKey[key] = panel
             }
             panel.updateContentAndGeometry(items: items, on: screen, forceLayout: forceLayout)
+        }
 
-            switch mode {
-            case .alwaysVisible:
+        if mode == .smartAutoHide && !eligiblePlans.isEmpty {
+            smartOverlappedScreenKeys = computeCurrentSmartOverlappedKeys(screens: screens)
+        } else {
+            smartOverlappedScreenKeys.removeAll()
+        }
+
+        cachedAutoHideScreens = eligiblePlans
+            .filter { plan in
+                mode == .autoHide || (mode == .smartAutoHide && smartOverlappedScreenKeys.contains(plan.key))
+            }
+            .map { ScreenAutoHideContext(screen: $0.screen, runtimeKey: $0.key, hasBelow: $0.hasBelow) }
+
+        syncMouseMonitors(shouldListen: !cachedAutoHideScreens.isEmpty)
+
+        for plan in eligiblePlans {
+            let screen = plan.screen
+            let key = plan.key
+            guard let panel = panelsByScreenKey[key] else { continue }
+
+            if !isScreenAutoHiding(key: key) {
                 cancelPendingTransitions(for: key)
                 hintsByScreenKey[key]?.orderOut(nil)
                 if !panel.isRevealed {
                     panel.reveal(animated: true, on: screen)
                 }
-
-            case .autoHide:
+            } else {
                 updateHintVisibility(for: screen, key: key, dockRevealed: panel.isRevealed)
                 let inKeepAlive = panel.keepAliveZone(on: screen).contains(mousePos)
                 let inTrigger = panel.triggerZone(on: screen, hasScreenBelow: plan.hasBelow).contains(mousePos)
@@ -258,7 +364,7 @@ final class MultiScreenController {
     // MARK: - Real-Time Auto-Hide State Machine
 
     func evaluateAutoHideNow() {
-        guard DockSettings.shared.visibilityMode == .autoHide else { return }
+        guard !cachedAutoHideScreens.isEmpty else { return }
         evaluateAutoHideState(at: NSEvent.mouseLocation)
     }
 
@@ -308,7 +414,7 @@ final class MultiScreenController {
             guard let self = self, let panel = panel else { return }
             self.revealWorkItems.removeValue(forKey: key)
 
-            guard DockSettings.shared.visibilityMode == .autoHide,
+            guard self.isScreenAutoHiding(key: key),
                   DockSettings.shared.isScreenEnabled(screen) else { return }
 
             let currentMouse = NSEvent.mouseLocation
@@ -332,7 +438,7 @@ final class MultiScreenController {
             guard let self = self, let panel = panel else { return }
             self.hideWorkItems.removeValue(forKey: key)
 
-            guard DockSettings.shared.visibilityMode == .autoHide else { return }
+            guard self.isScreenAutoHiding(key: key) else { return }
 
             let currentMouse = NSEvent.mouseLocation
             if panel.keepAliveZone(on: screen).contains(currentMouse) || panel.hasActivePopup {
@@ -349,7 +455,7 @@ final class MultiScreenController {
     }
 
     private func updateHintVisibility(for screen: NSScreen, key: String, dockRevealed: Bool) {
-        let shouldShowHint = DockSettings.shared.visibilityMode == .autoHide
+        let shouldShowHint = isScreenAutoHiding(key: key)
             && DockSettings.shared.showHiddenHintPill
             && !dockRevealed
             && DockSettings.shared.isScreenEnabled(screen)

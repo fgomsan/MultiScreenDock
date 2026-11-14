@@ -82,6 +82,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch settings.visibilityMode {
         case .autoHide:
             headerTitle = L10n.headerAutoHide(enabledCount: counts.enabled, total: counts.total)
+        case .smartAutoHide:
+            headerTitle = L10n.headerSmartAutoHide(visible: counts.visibleNow, enabledCount: counts.enabled, total: counts.total)
         case .alwaysVisible:
             headerTitle = nativeAutohide
                 ? L10n.headerAllPanels(visible: counts.visibleNow, total: counts.total)
@@ -113,6 +115,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         autoHideModeItem.state = (settings.visibilityMode == .autoHide) ? .on : .off
         menu.addItem(autoHideModeItem)
 
+        let smartAutoHideModeItem = NSMenuItem(
+            title: L10n.modeSmartAutoHide,
+            action: #selector(selectModeSmartAutoHide),
+            keyEquivalent: ""
+        )
+        smartAutoHideModeItem.target = self
+        smartAutoHideModeItem.state = (settings.visibilityMode == .smartAutoHide) ? .on : .off
+        menu.addItem(smartAutoHideModeItem)
+
         let fixedModeItem = NSMenuItem(
             title: L10n.modeAlwaysVisible,
             action: #selector(selectModeAlwaysVisible),
@@ -122,7 +133,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         fixedModeItem.state = (settings.visibilityMode == .alwaysVisible) ? .on : .off
         menu.addItem(fixedModeItem)
 
-        if settings.visibilityMode == .autoHide {
+        if settings.visibilityMode == .autoHide || settings.visibilityMode == .smartAutoHide {
             let hintItem = NSMenuItem(
                 title: L10n.showHintPill,
                 action: #selector(toggleHintPill),
@@ -370,6 +381,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func selectModeAutoHide() {
         DockSettings.shared.visibilityMode = .autoHide
+    }
+
+    @objc private func selectModeSmartAutoHide() {
+        DockSettings.shared.visibilityMode = .smartAutoHide
     }
 
     @objc private func selectModeAlwaysVisible() {

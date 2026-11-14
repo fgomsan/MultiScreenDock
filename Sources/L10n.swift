@@ -118,6 +118,19 @@ enum L10n {
         )
     }
 
+    static func headerSmartAutoHide(visible: Int, enabledCount: Int, total: Int) -> String {
+        tr(
+            en: "MultiScreenDock — Smart auto-hide (\(visible)/\(enabledCount) visible across \(total) \(plural(total, one: "display", other: "displays")))",
+            es: "MultiScreenDock — Ocultación inteligente (\(visible)/\(enabledCount) visibles en \(total) \(plural(total, one: "pantalla", other: "pantallas")))",
+            fr: "MultiScreenDock — Masquage intelligent (\(visible)/\(enabledCount) visibles sur \(total) \(plural(total, one: "écran", other: "écrans")))",
+            de: "MultiScreenDock — Intelligentes Ausblenden (\(visible)/\(enabledCount) sichtbar auf \(total) \(plural(total, one: "Display", other: "Displays")))",
+            pt: "MultiScreenDock — Ocultação inteligente (\(visible)/\(enabledCount) visíveis em \(total) \(plural(total, one: "monitor", other: "monitores")))",
+            it: "MultiScreenDock — Nascondi intelligente (\(visible)/\(enabledCount) visibili su \(total) \(plural(total, one: "schermo", other: "schermi")))",
+            ja: "MultiScreenDock — スマート自動非表示（全\(total)台中 \(visible)/\(enabledCount)台表示中）",
+            zh: "MultiScreenDock — 智能避让隐藏（共 \(total) 台显示器，当前显示 \(visible)/\(enabledCount)）"
+        )
+    }
+
     static var modeAutoHide: String {
         tr(
             en: "Auto-hide & reveal on bottom hover",
@@ -128,6 +141,19 @@ enum L10n {
             it: "Nascondi e mostra al passaggio sul bordo inferiore",
             ja: "自動的に隠す（画面下端にカーソルを合わせて表示）",
             zh: "自动隐藏（鼠标移至底部边缘时显示）"
+        )
+    }
+
+    static var modeSmartAutoHide: String {
+        tr(
+            en: "Smart auto-hide (only when a window overlaps the Dock)",
+            es: "Ocultación inteligente (solo si una ventana tapa el Dock)",
+            fr: "Masquage intelligent (uniquement si une fenêtre couvre le Dock)",
+            de: "Intelligent ausblenden (nur wenn ein Fenster das Dock überlappt)",
+            pt: "Ocultação inteligente (apenas quando uma janela cobre o Dock)",
+            it: "Nascondi intelligente (solo se una finestra copre il Dock)",
+            ja: "スマート自動非表示（ウィンドウがDockに重なる時のみ隠す）",
+            zh: "智能自动隐藏（仅当窗口遮挡程序坞时隐藏）"
         )
     }
 

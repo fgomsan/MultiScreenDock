@@ -2,8 +2,9 @@ import Cocoa
 import ColorSync
 import ServiceManagement
 
-enum DockVisibilityMode: String {
+enum DockVisibilityMode: String, CaseIterable {
     case alwaysVisible = "alwaysVisible"
+    case smartAutoHide = "smartAutoHide"
     case autoHide = "autoHide"
 }
 

@@ -740,6 +740,77 @@ private func localIconCenterX(_ cx: CGFloat, iconSize: CGFloat, gap: CGFloat, pi
     cx - iconSize / 2 - gap - pillWidth
 }
 
+// 16. Smart Auto-Hide (Dodge Windows): Quartz-to-AppKit multi-monitor coordinate conversion & Dock overlap geometry
+func testSmartAutoHideWindowOverlapAndQuartzCoordinateConversion() {
+    let primaryHeight: CGFloat = 1117.0 // 16" MacBook Pro
+
+    // 16a. Primary display window at bottom (Quartz y = 1017, h = 100 -> AppKit y = 0, h = 100)
+    let qPrimaryBottom = CGRect(x: 200, y: 1017, width: 1200, height: 100)
+    let akPrimaryBottom = DockLayoutMath.quartzRectToAppKit(qPrimaryBottom, primaryScreenHeight: primaryHeight)
+    expect(abs(akPrimaryBottom.origin.y - 0.0) < 0.01, "Primary bottom window Quartz->AppKit Y must be 0")
+
+    // 16b. Upper stacked display (AppKit frame: x = 0, y = 1117, w = 2560, h = 1440)
+    // In Quartz coordinates, top of upper display is y = -1440; a maximized window (y = -1415, h = 1415) touches y = 0 in Quartz -> AppKit y = 1117
+    let upperScreen = NSRect(x: 0, y: 1117, width: 2560, height: 1440)
+    let upperDodge = DockLayoutMath.dockDodgeZone(
+        screenFrame: upperScreen,
+        barSize: NSSize(width: 640, height: 52),
+        bottomMargin: 6
+    )
+    expect(upperDodge.minY == 1117 && upperDodge.height == 62, "Upper display dodge zone must sit at y=1117 with height 62")
+
+    // Window in top half of upper display (Quartz y = -1400, h = 700 -> AppKit y = 1817..2517): NO overlap
+    let akUpperTopHalf = DockLayoutMath.quartzRectToAppKit(
+        CGRect(x: 100, y: -1400, width: 1800, height: 700),
+        primaryScreenHeight: primaryHeight
+    )
+    expect(
+        !DockLayoutMath.doesAnyWindowOverlapDock(dockZone: upperDodge, windowRectsInAppKit: [akUpperTopHalf]),
+        "Window in top half of upper stacked monitor must NOT trigger Smart Auto-Hide"
+    )
+
+    // Window reaching bottom center of upper display (Quartz y = -1200, h = 1190 -> AppKit y = 1127..2317): OVERLAPS!
+    let akUpperBottom = DockLayoutMath.quartzRectToAppKit(
+        CGRect(x: 400, y: -1200, width: 1600, height: 1190),
+        primaryScreenHeight: primaryHeight
+    )
+    expect(
+        DockLayoutMath.doesAnyWindowOverlapDock(dockZone: upperDodge, windowRectsInAppKit: [akUpperBottom]),
+        "Window overlapping bottom center of upper stacked monitor MUST trigger Smart Auto-Hide"
+    )
+
+    // Window at bottom-left corner of wide 2560px monitor, completely to the left of centered 640px Dock pill: NO overlap!
+    let akUpperLeftCorner = NSRect(x: 10, y: 1117, width: 400, height: 600)
+    expect(
+        !DockLayoutMath.doesAnyWindowOverlapDock(dockZone: upperDodge, windowRectsInAppKit: [akUpperLeftCorner]),
+        "Side window that does not touch the centered Dock pill must NOT hide the Dock"
+    )
+
+    // Tiny tooltip/helper window (< 80x60) inside dockZone is ignored
+    let tinyTooltip = NSRect(x: upperScreen.midX - 20, y: 1120, width: 40, height: 24)
+    expect(
+        !DockLayoutMath.doesAnyWindowOverlapDock(dockZone: upperDodge, windowRectsInAppKit: [tinyTooltip]),
+        "Tiny tooltip windows (<80x60) must be ignored by Smart Auto-Hide"
+    )
+
+    // 16c. Isolated UserDefaults persistence & all 8 language localizations for .smartAutoHide
+    let suiteName = "io.github.fgomsan.MultiScreenDock.smartTest.\(UUID().uuidString)"
+    if let suite = UserDefaults(suiteName: suiteName) {
+        defer { suite.removePersistentDomain(forName: suiteName) }
+        let s = DockSettings(defaults: suite)
+        s.visibilityMode = .smartAutoHide
+        expect(s.visibilityMode == .smartAutoHide, "DockSettings must persist .smartAutoHide")
+    }
+
+    for lang in AppLanguage.allCases where lang != .system {
+        L10n.overrideLanguageForTesting = lang
+        expect(!L10n.modeSmartAutoHide.isEmpty, "modeSmartAutoHide empty for \(lang)")
+        let hdr = L10n.headerSmartAutoHide(visible: 2, enabledCount: 4, total: 5)
+        expect(hdr.contains("2/4") && hdr.contains("5"), "headerSmartAutoHide missing counts for \(lang)")
+    }
+    L10n.overrideLanguageForTesting = nil
+}
+
 @main
 struct TestRunner {
     static func main() {
@@ -758,6 +829,7 @@ struct TestRunner {
         testFolderStackSortStyleGeometryAndDirectoryReader()
         testContinuousCosineWaveMagnificationAndFocalLock()
         testFanStackHitTestingFirstMouseAndDragLifecycleOnStackedMonitors()
+        testSmartAutoHideWindowOverlapAndQuartzCoordinateConversion()
 
         print("MultiScreenDock Tests: \(passedTests) passed, \(failedTests) failed.")
         if failedTests > 0 {

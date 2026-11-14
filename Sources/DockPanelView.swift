@@ -901,6 +901,43 @@ enum DockLayoutMath {
         return barKeep.union(maxTrigger)
     }
 
+    /// Resting footprint of the Dock pill on `screenFrame` used by Smart Auto-Hide (`smartAutoHide`)
+    /// to detect whether any standard user window overlaps the Dock area on that display.
+    static func dockDodgeZone(screenFrame: NSRect, barSize: NSSize, bottomMargin: CGFloat) -> NSRect {
+        let width = min(screenFrame.width - 8, max(60, barSize.width + 8))
+        let height = max(24, bottomMargin + barSize.height + 4)
+        return NSRect(
+            x: round(screenFrame.midX - width / 2),
+            y: screenFrame.minY,
+            width: width,
+            height: height
+        )
+    }
+
+    /// Converts a CoreGraphics/Quartz global window rect (`kCGWindowBounds`, top-left origin on primary display)
+    /// into AppKit global screen coordinates (`NSScreen.frame`, bottom-left origin on primary display).
+    static func quartzRectToAppKit(_ quartzRect: CGRect, primaryScreenHeight: CGFloat) -> NSRect {
+        NSRect(
+            x: quartzRect.origin.x,
+            y: primaryScreenHeight - (quartzRect.origin.y + quartzRect.size.height),
+            width: quartzRect.size.width,
+            height: quartzRect.size.height
+        )
+    }
+
+    /// Returns true when any standard application window rect (in AppKit screen coordinates) intersects
+    /// `dockZone` by at least 4×4 pt.
+    static func doesAnyWindowOverlapDock(dockZone: NSRect, windowRectsInAppKit: [NSRect]) -> Bool {
+        for winRect in windowRectsInAppKit {
+            guard winRect.width >= 80, winRect.height >= 60 else { continue }
+            let inter = dockZone.intersection(winRect)
+            if !inter.isNull && inter.width >= 4.0 && inter.height >= 4.0 {
+                return true
+            }
+        }
+        return false
+    }
+
     struct WaveSlotInput: Equatable {
         let isSeparator: Bool
     }
@@ -1682,6 +1719,14 @@ final class DockBarPanel: NSPanel {
 
     func keepAliveZone(on screen: NSScreen) -> NSRect {
         DockLayoutMath.keepAliveZone(
+            screenFrame: screen.frame,
+            barSize: currentBarSize,
+            bottomMargin: DockSettings.shared.bottomMargin
+        )
+    }
+
+    func dodgeZone(on screen: NSScreen) -> NSRect {
+        DockLayoutMath.dockDodgeZone(
             screenFrame: screen.frame,
             barSize: currentBarSize,
             bottomMargin: DockSettings.shared.bottomMargin

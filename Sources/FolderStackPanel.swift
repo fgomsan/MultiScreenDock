@@ -533,11 +533,10 @@ final class FolderStackController {
     }
 
     func didEndOutgoingFileDrag() {
+        isDraggingFile = false
+        didConfirmDragSessionStart = false
         DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-            self.isDraggingFile = false
-            self.didConfirmDragSessionStart = false
-            self.dismiss(animated: false)
+            self?.dismiss(animated: false)
         }
     }
 

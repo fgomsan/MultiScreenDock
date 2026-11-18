@@ -67,6 +67,7 @@ final class MultiScreenController {
     private var hintsByScreenKey: [String: EdgeHintPanel] = [:]
     private var cachedAutoHideScreens: [ScreenAutoHideContext] = []
     private var smartOverlappedScreenKeys: Set<String> = []
+    private var fullscreenSuppressedScreenKeys: Set<String> = []
 
     private var revealWorkItems: [String: DispatchWorkItem] = [:]
     private var hideWorkItems: [String: DispatchWorkItem] = [:]
@@ -101,6 +102,13 @@ final class MultiScreenController {
         for name in wsEvents {
             wsnc.addObserver(self, selector: #selector(handleWorkspaceEvent), name: name, object: nil)
         }
+
+        DistributedNotificationCenter.default().addObserver(
+            self,
+            selector: #selector(handleSystemAppearanceChange),
+            name: NSNotification.Name("AppleInterfaceThemeChangedNotification"),
+            object: nil
+        )
 
         refreshAll(forceLayout: true)
 
@@ -182,6 +190,10 @@ final class MultiScreenController {
         refreshAll(forceLayout: false)
     }
 
+    @objc private func handleSystemAppearanceChange() {
+        refreshAll(forceLayout: false)
+    }
+
     private func periodicTick() {
         let plistChanged = DockModelReader.shared.checkPlistChangedAndReloadIfNeeded()
         let sig = computeNativeInsetsSignature()
@@ -191,10 +203,18 @@ final class MultiScreenController {
             return
         }
 
-        let mode = DockSettings.shared.visibilityMode
-        if mode == .smartAutoHide {
-            let currentOverlapped = computeCurrentSmartOverlappedKeys()
-            if currentOverlapped != smartOverlappedScreenKeys {
+        let settings = DockSettings.shared
+        let mode = settings.visibilityMode
+        if mode == .smartAutoHide || !settings.showOverFullScreen {
+            let screens = NSScreen.screens
+            let windowRects = DockWindowOverlapDetector.currentStandardWindowRectsInAppKit(screens: screens)
+            let currentFullscreen = settings.showOverFullScreen
+                ? Set<String>()
+                : computeFullscreenScreenKeys(screens: screens, windowRects: windowRects)
+            let currentOverlapped = (mode == .smartAutoHide)
+                ? computeCurrentSmartOverlappedKeys(screens: screens, windowRects: windowRects)
+                : Set<String>()
+            if currentFullscreen != fullscreenSuppressedScreenKeys || currentOverlapped != smartOverlappedScreenKeys {
                 refreshAll(forceLayout: false)
                 return
             }
@@ -205,15 +225,35 @@ final class MultiScreenController {
         }
     }
 
-    private func computeCurrentSmartOverlappedKeys(screens: [NSScreen] = NSScreen.screens) -> Set<String> {
+    private func computeFullscreenScreenKeys(
+        screens: [NSScreen] = NSScreen.screens,
+        windowRects: [NSRect]? = nil
+    ) -> Set<String> {
         let settings = DockSettings.shared
-        let windowRects = DockWindowOverlapDetector.currentStandardWindowRectsInAppKit(screens: screens)
-        guard !windowRects.isEmpty else { return [] }
+        guard !settings.showOverFullScreen else { return [] }
+        let rects = windowRects ?? DockWindowOverlapDetector.currentStandardWindowRectsInAppKit(screens: screens)
+        guard !rects.isEmpty else { return [] }
+        var fullscreenKeys = Set<String>()
+        for screen in screens where settings.isScreenEnabled(screen) {
+            if DockLayoutMath.doesAnyWindowFillScreen(screenFrame: screen.frame, windowRectsInAppKit: rects) {
+                fullscreenKeys.insert(settings.runtimeScreenKey(for: screen))
+            }
+        }
+        return fullscreenKeys
+    }
+
+    private func computeCurrentSmartOverlappedKeys(
+        screens: [NSScreen] = NSScreen.screens,
+        windowRects: [NSRect]? = nil
+    ) -> Set<String> {
+        let settings = DockSettings.shared
+        let rects = windowRects ?? DockWindowOverlapDetector.currentStandardWindowRectsInAppKit(screens: screens)
+        guard !rects.isEmpty else { return [] }
         var overlapped = Set<String>()
         for screen in screens where settings.isScreenEnabled(screen) {
             let key = settings.runtimeScreenKey(for: screen)
             guard let panel = panelsByScreenKey[key] else { continue }
-            if DockLayoutMath.doesAnyWindowOverlapDock(dockZone: panel.dodgeZone(on: screen), windowRectsInAppKit: windowRects) {
+            if DockLayoutMath.doesAnyWindowOverlapDock(dockZone: panel.dodgeZone(on: screen), windowRectsInAppKit: rects) {
                 overlapped.insert(key)
             }
         }
@@ -266,13 +306,27 @@ final class MultiScreenController {
             let hasBelow: Bool
         }
 
+        let needWindowScan = (mode == .smartAutoHide) || !settings.showOverFullScreen
+        let windowRects = needWindowScan
+            ? DockWindowOverlapDetector.currentStandardWindowRectsInAppKit(screens: screens)
+            : []
+        fullscreenSuppressedScreenKeys = settings.showOverFullScreen
+            ? []
+            : computeFullscreenScreenKeys(screens: screens, windowRects: windowRects)
+
         let plans: [ScreenPlan] = screens.map { screen in
             let key = settings.runtimeScreenKey(for: screen)
             let enabled = settings.isScreenEnabled(screen)
             let nativeDockBottomInset = screen.visibleFrame.minY - screen.frame.minY
-            let suppressed = avoidOverlap && (nativeDockBottomInset > 10.0)
+            let suppressedByNativeDock = avoidOverlap && (nativeDockBottomInset > 10.0)
+            let suppressedByFullscreen = !settings.showOverFullScreen && fullscreenSuppressedScreenKeys.contains(key)
             let hasBelow = DockLayoutMath.hasMonitorDirectlyBelow(targetFrame: screen.frame, among: allFrames)
-            return ScreenPlan(screen: screen, key: key, eligible: enabled && !suppressed, hasBelow: hasBelow)
+            return ScreenPlan(
+                screen: screen,
+                key: key,
+                eligible: enabled && !suppressedByNativeDock && !suppressedByFullscreen,
+                hasBelow: hasBelow
+            )
         }
 
         let activeKeys = Set(plans.map { $0.key })
@@ -306,7 +360,7 @@ final class MultiScreenController {
         }
 
         if mode == .smartAutoHide && !eligiblePlans.isEmpty {
-            smartOverlappedScreenKeys = computeCurrentSmartOverlappedKeys(screens: screens)
+            smartOverlappedScreenKeys = computeCurrentSmartOverlappedKeys(screens: screens, windowRects: windowRects)
         } else {
             smartOverlappedScreenKeys.removeAll()
         }

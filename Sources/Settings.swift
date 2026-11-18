@@ -8,6 +8,12 @@ enum DockVisibilityMode: String, CaseIterable {
     case autoHide = "autoHide"
 }
 
+enum DockAppearanceMode: String, CaseIterable {
+    case system = "system"
+    case light = "light"
+    case dark = "dark"
+}
+
 enum FolderStackStylePreference: String, CaseIterable {
     case dockDefault = "dockDefault"
     case fan = "fan"
@@ -105,6 +111,8 @@ final class DockSettings {
         static let autoCheckUpdates = "autoCheckUpdates"
         static let lastUpdateCheckTimestamp = "lastUpdateCheckTimestamp"
         static let folderStackStyle = "folderStackStyle"
+        static let appearanceMode = "appearanceMode"
+        static let didMigrateFullScreenDefaultV143 = "didMigrateFullScreenDefaultV143"
     }
 
     var onChange: (() -> Void)?
@@ -119,7 +127,7 @@ final class DockSettings {
             Keys.skipPrimaryDisplay: true,
             Keys.iconSize: initialTileSize,
             Keys.avoidNativeDockOverlap: true,
-            Keys.showOverFullScreen: true,
+            Keys.showOverFullScreen: false,
             Keys.hoverMagnification: true,
             Keys.showRunningUnpinned: true,
             Keys.bottomMargin: 6.0,
@@ -127,8 +135,13 @@ final class DockSettings {
             Keys.appLanguage: AppLanguage.system.rawValue,
             Keys.autoCheckUpdates: true,
             Keys.lastUpdateCheckTimestamp: 0.0,
-            Keys.folderStackStyle: FolderStackStylePreference.dockDefault.rawValue
+            Keys.folderStackStyle: FolderStackStylePreference.dockDefault.rawValue,
+            Keys.appearanceMode: DockAppearanceMode.system.rawValue
         ])
+        if !defaults.bool(forKey: Keys.didMigrateFullScreenDefaultV143) {
+            defaults.set(true, forKey: Keys.didMigrateFullScreenDefaultV143)
+            defaults.set(false, forKey: Keys.showOverFullScreen)
+        }
     }
 
     static func readNativeTileSize() -> Double? {
@@ -284,6 +297,41 @@ final class DockSettings {
         set {
             defaults.set(newValue.rawValue, forKey: Keys.folderStackStyle)
             onChange?()
+        }
+    }
+
+    var appearanceMode: DockAppearanceMode {
+        get {
+            guard let raw = defaults.string(forKey: Keys.appearanceMode),
+                  let val = DockAppearanceMode(rawValue: raw) else {
+                return .system
+            }
+            return val
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Keys.appearanceMode)
+            onChange?()
+        }
+    }
+
+    func isEffectiveDarkAppearance(systemIsDarkOverride: Bool? = nil) -> Bool {
+        switch appearanceMode {
+        case .dark:
+            return true
+        case .light:
+            return false
+        case .system:
+            if let override = systemIsDarkOverride {
+                return override
+            }
+            if let app = NSApp {
+                let match = app.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua])
+                if let match = match {
+                    return match == .darkAqua
+                }
+            }
+            let style = UserDefaults.standard.string(forKey: "AppleInterfaceStyle") ?? ""
+            return style.caseInsensitiveCompare("Dark") == .orderedSame
         }
     }
 

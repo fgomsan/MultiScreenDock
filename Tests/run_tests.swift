@@ -811,6 +811,60 @@ func testSmartAutoHideWindowOverlapAndQuartzCoordinateConversion() {
     L10n.overrideLanguageForTesting = nil
 }
 
+// 17. Light / Dark Appearance Mode (#3) & Per-Display Fullscreen Detection (#4)
+func testLightDarkAppearanceAndFullscreenDisplayDetection() {
+    let suiteName = "io.github.fgomsan.MultiScreenDock.appearanceTest.\(UUID().uuidString)"
+    if let suite = UserDefaults(suiteName: suiteName) {
+        defer { suite.removePersistentDomain(forName: suiteName) }
+        let s = DockSettings(defaults: suite)
+
+        // Default appearanceMode must be .system, and default showOverFullScreen must be false (Issue #4 safe default)
+        expect(s.appearanceMode == .system, "Default appearanceMode must be .system")
+        expect(s.showOverFullScreen == false, "Default showOverFullScreen must be false to prevent fullscreen Space interference")
+        expect(s.isEffectiveDarkAppearance(systemIsDarkOverride: false) == false, ".system with Light OS must resolve to light")
+        expect(s.isEffectiveDarkAppearance(systemIsDarkOverride: true) == true, ".system with Dark OS must resolve to dark")
+
+        s.appearanceMode = .light
+        expect(s.appearanceMode == .light, "appearanceMode must persist .light")
+        expect(s.isEffectiveDarkAppearance(systemIsDarkOverride: true) == false, ".light must force light even when OS is dark")
+
+        s.appearanceMode = .dark
+        expect(s.appearanceMode == .dark, "appearanceMode must persist .dark")
+        expect(s.isEffectiveDarkAppearance(systemIsDarkOverride: false) == true, ".dark must force dark even when OS is light")
+    }
+
+    let lightPalette = DockThemePalette(isDark: false)
+    let darkPalette = DockThemePalette(isDark: true)
+    expect(lightPalette.nsAppearance?.name == .aqua, "Light palette must use .aqua appearance")
+    expect(darkPalette.nsAppearance?.name == .darkAqua, "Dark palette must use .darkAqua appearance")
+    expect(lightPalette.barMaterial == .menu, "Light palette must use translucent .menu glass material")
+    expect(darkPalette.barMaterial == .hudWindow, "Dark palette must use .hudWindow material")
+
+    // Fullscreen window detection on multi-monitor setups (Issue #4)
+    let screen1 = NSRect(x: 0, y: 0, width: 1728, height: 1117)
+    let screen2 = NSRect(x: 1728, y: 0, width: 2560, height: 1440)
+    let normalWindowOnScreen1 = NSRect(x: 100, y: 80, width: 1200, height: 900)
+    let fullscreenWindowOnScreen2 = NSRect(x: 1728, y: 0, width: 2560, height: 1440)
+
+    expect(
+        !DockLayoutMath.doesAnyWindowFillScreen(screenFrame: screen1, windowRectsInAppKit: [normalWindowOnScreen1, fullscreenWindowOnScreen2]),
+        "Screen 1 with normal windowed app must NOT be detected as fullscreen"
+    )
+    expect(
+        DockLayoutMath.doesAnyWindowFillScreen(screenFrame: screen2, windowRectsInAppKit: [normalWindowOnScreen1, fullscreenWindowOnScreen2]),
+        "Screen 2 with a 2560x1440 fullscreen window must be detected as fullscreen"
+    )
+
+    for lang in AppLanguage.allCases where lang != .system {
+        L10n.overrideLanguageForTesting = lang
+        expect(!L10n.appearanceMenu.isEmpty, "appearanceMenu empty for \(lang)")
+        expect(!L10n.appearanceSystemAuto.isEmpty, "appearanceSystemAuto empty for \(lang)")
+        expect(!L10n.appearanceLight.isEmpty, "appearanceLight empty for \(lang)")
+        expect(!L10n.appearanceDark.isEmpty, "appearanceDark empty for \(lang)")
+    }
+    L10n.overrideLanguageForTesting = nil
+}
+
 @main
 struct TestRunner {
     static func main() {
@@ -830,6 +884,7 @@ struct TestRunner {
         testContinuousCosineWaveMagnificationAndFocalLock()
         testFanStackHitTestingFirstMouseAndDragLifecycleOnStackedMonitors()
         testSmartAutoHideWindowOverlapAndQuartzCoordinateConversion()
+        testLightDarkAppearanceAndFullscreenDisplayDetection()
 
         print("MultiScreenDock Tests: \(passedTests) passed, \(failedTests) failed.")
         if failedTests > 0 {

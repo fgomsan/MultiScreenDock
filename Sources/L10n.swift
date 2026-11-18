@@ -339,6 +339,58 @@ enum L10n {
         )
     }
 
+    static var appearanceMenu: String {
+        tr(
+            en: "Appearance",
+            es: "Apariencia",
+            fr: "Apparence",
+            de: "Erscheinungsbild",
+            pt: "Aparência",
+            it: "Aspetto",
+            ja: "外観モード",
+            zh: "外观"
+        )
+    }
+
+    static var appearanceSystemAuto: String {
+        tr(
+            en: "System (Follow macOS Light / Dark)",
+            es: "Sistema (Seguir modo claro / oscuro de macOS)",
+            fr: "Système (Suivre le mode clair / sombre de macOS)",
+            de: "System (macOS Hell / Dunkel folgen)",
+            pt: "Sistema (Seguir modo claro / escuro do macOS)",
+            it: "Sistema (Segui modalità chiara / scura di macOS)",
+            ja: "システム設定に従う（ライト / ダーク）",
+            zh: "跟随系统（浅色 / 深色）"
+        )
+    }
+
+    static var appearanceLight: String {
+        tr(
+            en: "Light Glass",
+            es: "Cristal claro",
+            fr: "Verre clair",
+            de: "Helles Glas",
+            pt: "Vidro claro",
+            it: "Vetro chiaro",
+            ja: "ライトガラス",
+            zh: "浅色毛玻璃"
+        )
+    }
+
+    static var appearanceDark: String {
+        tr(
+            en: "Dark Glass",
+            es: "Cristal oscuro",
+            fr: "Verre sombre",
+            de: "Dunkles Glas",
+            pt: "Vidro escuro",
+            it: "Vetro scuro",
+            ja: "ダークガラス",
+            zh: "深色毛玻璃"
+        )
+    }
+
     static var sizeCompact: String {
         tr(
             en: "Compact (28 pt)",

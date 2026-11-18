@@ -255,6 +255,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sizeParent.submenu = sizeSubmenu
         menu.addItem(sizeParent)
 
+        // Appearance Submenu (System / Light / Dark)
+        let appearanceSubmenu = NSMenu()
+        let appearanceChoices: [(String, DockAppearanceMode)] = [
+            (L10n.appearanceSystemAuto, .system),
+            (L10n.appearanceLight, .light),
+            (L10n.appearanceDark, .dark)
+        ]
+        for (title, mode) in appearanceChoices {
+            let apItem = NSMenuItem(title: title, action: #selector(selectAppearanceMode(_:)), keyEquivalent: "")
+            apItem.target = self
+            apItem.representedObject = mode.rawValue
+            apItem.state = (settings.appearanceMode == mode) ? .on : .off
+            appearanceSubmenu.addItem(apItem)
+        }
+        let appearanceParent = NSMenuItem(title: L10n.appearanceMenu, action: nil, keyEquivalent: "")
+        appearanceParent.submenu = appearanceSubmenu
+        menu.addItem(appearanceParent)
+
         // Folder Stack Style Submenu
         let stackStyleSubmenu = NSMenu()
         let stackChoices: [(String, FolderStackStylePreference)] = [
@@ -437,6 +455,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let raw = sender.representedObject as? String,
            let pref = FolderStackStylePreference(rawValue: raw) {
             DockSettings.shared.folderStackStyle = pref
+        }
+    }
+
+    @objc private func selectAppearanceMode(_ sender: NSMenuItem) {
+        if let raw = sender.representedObject as? String,
+           let mode = DockAppearanceMode(rawValue: raw) {
+            DockSettings.shared.appearanceMode = mode
         }
     }
 

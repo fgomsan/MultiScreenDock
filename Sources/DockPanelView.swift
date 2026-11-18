@@ -1,6 +1,44 @@
 import Cocoa
 import QuartzCore
 
+// MARK: - Dynamic Light / Dark Dock Theme Palette
+
+struct DockThemePalette {
+    let isDark: Bool
+
+    static var current: DockThemePalette {
+        DockThemePalette(isDark: DockSettings.shared.isEffectiveDarkAppearance())
+    }
+
+    var nsAppearance: NSAppearance? {
+        NSAppearance(named: isDark ? .darkAqua : .aqua)
+    }
+
+    var barMaterial: NSVisualEffectView.Material {
+        isDark ? .hudWindow : .menu
+    }
+
+    var barBorderColor: NSColor {
+        isDark
+            ? NSColor.white.withAlphaComponent(0.24)
+            : NSColor.black.withAlphaComponent(0.16)
+    }
+
+    var separatorColor: NSColor {
+        isDark
+            ? NSColor.white.withAlphaComponent(0.24)
+            : NSColor.black.withAlphaComponent(0.20)
+    }
+
+    func runningDotColor(isFrontmost: Bool) -> NSColor {
+        if isDark {
+            return NSColor.white.withAlphaComponent(isFrontmost ? 0.96 : 0.62)
+        } else {
+            return NSColor.black.withAlphaComponent(isFrontmost ? 0.82 : 0.48)
+        }
+    }
+}
+
 // MARK: - Subtle Bottom Edge Hint Pill (for Auto-Hide Mode)
 
 final class EdgeHintPanel: NSPanel {
@@ -98,14 +136,11 @@ final class HoverBubbleController {
         panel.isOpaque = false
         panel.backgroundColor = .clear
         panel.hasShadow = true
-        panel.appearance = NSAppearance(named: .darkAqua)
         panel.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.dockWindow)) + 2)
         panel.ignoresMouseEvents = true
-        panel.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]
 
         effectView = NSVisualEffectView(frame: panel.contentView!.bounds)
         effectView.autoresizingMask = [.width, .height]
-        effectView.material = .hudWindow
         effectView.blendingMode = .behindWindow
         effectView.state = .active
         effectView.wantsLayer = true
@@ -113,7 +148,6 @@ final class HoverBubbleController {
         effectView.layer?.cornerCurve = .continuous
         effectView.layer?.masksToBounds = true
         effectView.layer?.borderWidth = 0.75
-        effectView.layer?.borderColor = NSColor.white.withAlphaComponent(0.22).cgColor
 
         labelField = NSTextField(labelWithString: "")
         labelField.font = NSFont.systemFont(ofSize: 12.5, weight: .medium)
@@ -123,6 +157,21 @@ final class HoverBubbleController {
 
         effectView.addSubview(labelField)
         panel.contentView?.addSubview(effectView)
+        applyAppearanceAndCollectionBehavior()
+    }
+
+    func applyAppearanceAndCollectionBehavior() {
+        let palette = DockThemePalette.current
+        panel.appearance = palette.nsAppearance
+        effectView.appearance = palette.nsAppearance
+        effectView.material = palette.barMaterial
+        effectView.layer?.borderColor = palette.barBorderColor.cgColor
+
+        var behavior: NSWindow.CollectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        if DockSettings.shared.showOverFullScreen {
+            behavior.insert(.fullScreenAuxiliary)
+        }
+        panel.collectionBehavior = behavior
     }
 
     func show(text: String, above screenRect: NSRect, on screen: NSScreen?) {
@@ -130,6 +179,7 @@ final class HoverBubbleController {
             hide()
             return
         }
+        applyAppearanceAndCollectionBehavior()
 
         let textChanged = (text != lastShownText) || cachedSize == .zero
         if textChanged {
@@ -257,12 +307,10 @@ final class DockTileView: NSView {
         trackingArea = area
     }
 
-    private func updateRunningDot() {
+    func updateRunningDot() {
         if item.isRunning {
             dotLayer.isHidden = false
-            dotLayer.backgroundColor = (item.isFrontmost
-                ? NSColor.white.withAlphaComponent(0.96)
-                : NSColor.white.withAlphaComponent(0.62)).cgColor
+            dotLayer.backgroundColor = DockThemePalette.current.runningDotColor(isFrontmost: item.isFrontmost).cgColor
         } else {
             dotLayer.isHidden = true
         }
@@ -938,6 +986,21 @@ enum DockLayoutMath {
         return false
     }
 
+    /// Returns true when any on-screen application window covers the entire display (`screenFrame` within 2 pt tolerance),
+    /// indicating an active native Fullscreen Space or borderless fullscreen application on that display.
+    static func doesAnyWindowFillScreen(screenFrame: NSRect, windowRectsInAppKit: [NSRect]) -> Bool {
+        guard screenFrame.width > 0, screenFrame.height > 0 else { return false }
+        for winRect in windowRectsInAppKit {
+            if abs(winRect.minX - screenFrame.minX) <= 2.0
+                && abs(winRect.minY - screenFrame.minY) <= 2.0
+                && abs(winRect.width - screenFrame.width) <= 2.0
+                && abs(winRect.height - screenFrame.height) <= 2.0 {
+                return true
+            }
+        }
+        return false
+    }
+
     struct WaveSlotInput: Equatable {
         let isSeparator: Bool
     }
@@ -1333,8 +1396,6 @@ final class DockBarPanel: NSPanel {
         shadowCarrier.layer?.shadowOffset = CGSize(width: 0, height: -3)
         slidingContainer.addSubview(shadowCarrier)
 
-        backgroundView.appearance = NSAppearance(named: .darkAqua)
-        backgroundView.material = .hudWindow
         backgroundView.blendingMode = .behindWindow
         backgroundView.state = .active
         backgroundView.wantsLayer = true
@@ -1342,12 +1403,29 @@ final class DockBarPanel: NSPanel {
         backgroundView.layer?.cornerCurve = .continuous
         backgroundView.layer?.masksToBounds = true
         backgroundView.layer?.borderWidth = 0.8
-        backgroundView.layer?.borderColor = NSColor.white.withAlphaComponent(0.24).cgColor
+        applyThemeAppearance()
         slidingContainer.addSubview(backgroundView)
 
         itemsContainer.wantsLayer = true
         itemsContainer.layer?.masksToBounds = false
         slidingContainer.addSubview(itemsContainer)
+    }
+
+    func applyThemeAppearance() {
+        let palette = DockThemePalette.current
+        appearance = palette.nsAppearance
+        backgroundView.appearance = palette.nsAppearance
+        backgroundView.material = palette.barMaterial
+        backgroundView.layer?.borderColor = palette.barBorderColor.cgColor
+
+        for elem in renderedElements {
+            switch elem {
+            case .separator(let sepView):
+                sepView.layer?.backgroundColor = palette.separatorColor.cgColor
+            case .tile(let tileView):
+                tileView.updateRunningDot()
+            }
+        }
     }
 
     override func rightMouseDown(with event: NSEvent) {
@@ -1382,6 +1460,7 @@ final class DockBarPanel: NSPanel {
     func updateContentAndGeometry(items: [DockItem], on screen: NSScreen, forceLayout: Bool = false) {
         assignedScreen = screen
         applyCollectionBehavior()
+        applyThemeAppearance()
 
         let preferredSize = DockSettings.shared.iconSize
         let maxBarWidth = screen.frame.width * 0.97
@@ -1766,7 +1845,7 @@ final class DockBarPanel: NSPanel {
                     height: max(18, iconSize - 4)
                 ))
                 sepView.wantsLayer = true
-                sepView.layer?.backgroundColor = NSColor.white.withAlphaComponent(0.24).cgColor
+                sepView.layer?.backgroundColor = DockThemePalette.current.separatorColor.cgColor
                 itemsContainer.addSubview(sepView)
                 renderedElements.append(.separator(sepView))
                 cachedWaveSlotInputs.append(.init(isSeparator: true))

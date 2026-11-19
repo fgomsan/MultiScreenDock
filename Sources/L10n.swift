@@ -391,6 +391,71 @@ enum L10n {
         )
     }
 
+    static var positionMenu: String {
+        tr(
+            en: "Position on Screen",
+            es: "Posición en pantalla",
+            fr: "Position à l’écran",
+            de: "Position auf dem Bildschirm",
+            pt: "Posição na tela",
+            it: "Posizione sullo schermo",
+            ja: "画面上の位置",
+            zh: "屏幕上的位置"
+        )
+    }
+
+    static var positionSystemAuto: String {
+        tr(
+            en: "Same as macOS Dock (Auto)",
+            es: "Igual que el Dock de macOS (Automático)",
+            fr: "Comme le Dock macOS (Auto)",
+            de: "Wie macOS-Dock (Automatisch)",
+            pt: "Igual ao Dock do macOS (Automático)",
+            it: "Come il Dock di macOS (Automatico)",
+            ja: "macOS標準Dockと同じ（自動）",
+            zh: "与 macOS 原生程序坞相同（自动）"
+        )
+    }
+
+    static var positionBottom: String {
+        tr(
+            en: "Bottom",
+            es: "Abajo",
+            fr: "Bas",
+            de: "Unten",
+            pt: "Inferior",
+            it: "In basso",
+            ja: "下",
+            zh: "底部"
+        )
+    }
+
+    static var positionLeft: String {
+        tr(
+            en: "Left",
+            es: "Izquierda",
+            fr: "Gauche",
+            de: "Links",
+            pt: "Esquerda",
+            it: "A sinistra",
+            ja: "左",
+            zh: "左侧"
+        )
+    }
+
+    static var positionRight: String {
+        tr(
+            en: "Right",
+            es: "Derecha",
+            fr: "Droite",
+            de: "Rechts",
+            pt: "Direita",
+            it: "A destra",
+            ja: "右",
+            zh: "右侧"
+        )
+    }
+
     static var sizeCompact: String {
         tr(
             en: "Compact (28 pt)",

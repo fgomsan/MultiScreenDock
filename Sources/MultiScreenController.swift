@@ -261,10 +261,14 @@ final class MultiScreenController {
     }
 
     private func computeNativeInsetsSignature() -> String {
-        NSScreen.screens.map { s in
+        let edgeRaw = DockSettings.shared.effectiveDockEdge().rawValue
+        let screensSig = NSScreen.screens.map { s in
             let insetBottom = Int(round(s.visibleFrame.minY - s.frame.minY))
-            return "\(DockSettings.shared.runtimeScreenKey(for: s)):\(insetBottom)"
+            let insetLeft = Int(round(s.visibleFrame.minX - s.frame.minX))
+            let insetRight = Int(round(s.frame.maxX - s.visibleFrame.maxX))
+            return "\(DockSettings.shared.runtimeScreenKey(for: s)):\(insetBottom),\(insetLeft),\(insetRight)"
         }.joined(separator: "|")
+        return "\(edgeRaw)#\(screensSig)"
     }
 
     func statusCounts() -> (enabled: Int, visibleNow: Int, total: Int) {
@@ -314,13 +318,17 @@ final class MultiScreenController {
             ? []
             : computeFullscreenScreenKeys(screens: screens, windowRects: windowRects)
 
+        let activeEdge = settings.effectiveDockEdge()
         let plans: [ScreenPlan] = screens.map { screen in
             let key = settings.runtimeScreenKey(for: screen)
             let enabled = settings.isScreenEnabled(screen)
-            let nativeDockBottomInset = screen.visibleFrame.minY - screen.frame.minY
-            let suppressedByNativeDock = avoidOverlap && (nativeDockBottomInset > 10.0)
+            let suppressedByNativeDock = avoidOverlap && DockLayoutMath.isNativeDockVisible(
+                on: activeEdge,
+                screenFrame: screen.frame,
+                visibleFrame: screen.visibleFrame
+            )
             let suppressedByFullscreen = !settings.showOverFullScreen && fullscreenSuppressedScreenKeys.contains(key)
-            let hasBelow = DockLayoutMath.hasMonitorDirectlyBelow(targetFrame: screen.frame, among: allFrames)
+            let hasBelow = DockLayoutMath.hasAdjacentMonitor(on: activeEdge, targetFrame: screen.frame, among: allFrames)
             return ScreenPlan(
                 screen: screen,
                 key: key,

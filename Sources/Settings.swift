@@ -14,6 +14,23 @@ enum DockAppearanceMode: String, CaseIterable {
     case dark = "dark"
 }
 
+enum DockScreenEdge: String, CaseIterable {
+    case bottom = "bottom"
+    case left = "left"
+    case right = "right"
+
+    var isVertical: Bool {
+        self != .bottom
+    }
+}
+
+enum DockPositionPreference: String, CaseIterable {
+    case system = "system"
+    case bottom = "bottom"
+    case left = "left"
+    case right = "right"
+}
+
 enum FolderStackStylePreference: String, CaseIterable {
     case dockDefault = "dockDefault"
     case fan = "fan"
@@ -112,6 +129,7 @@ final class DockSettings {
         static let lastUpdateCheckTimestamp = "lastUpdateCheckTimestamp"
         static let folderStackStyle = "folderStackStyle"
         static let appearanceMode = "appearanceMode"
+        static let dockPosition = "dockPosition"
         static let didMigrateFullScreenDefaultV143 = "didMigrateFullScreenDefaultV143"
     }
 
@@ -136,7 +154,8 @@ final class DockSettings {
             Keys.autoCheckUpdates: true,
             Keys.lastUpdateCheckTimestamp: 0.0,
             Keys.folderStackStyle: FolderStackStylePreference.dockDefault.rawValue,
-            Keys.appearanceMode: DockAppearanceMode.system.rawValue
+            Keys.appearanceMode: DockAppearanceMode.system.rawValue,
+            Keys.dockPosition: DockPositionPreference.system.rawValue
         ])
         if !defaults.bool(forKey: Keys.didMigrateFullScreenDefaultV143) {
             defaults.set(true, forKey: Keys.didMigrateFullScreenDefaultV143)
@@ -148,6 +167,18 @@ final class DockSettings {
         guard let appleDock = UserDefaults(suiteName: "com.apple.dock") else { return nil }
         let val = appleDock.double(forKey: "tilesize")
         return (val >= 20 && val <= 80) ? val : nil
+    }
+
+    static func readNativeDockEdge() -> DockScreenEdge {
+        guard let appleDock = UserDefaults(suiteName: "com.apple.dock"),
+              let raw = appleDock.string(forKey: "orientation")?.lowercased() else {
+            return .bottom
+        }
+        switch raw {
+        case "left": return .left
+        case "right": return .right
+        default: return .bottom
+        }
     }
 
     var visibilityMode: DockVisibilityMode {
@@ -311,6 +342,33 @@ final class DockSettings {
         set {
             defaults.set(newValue.rawValue, forKey: Keys.appearanceMode)
             onChange?()
+        }
+    }
+
+    var dockPosition: DockPositionPreference {
+        get {
+            guard let raw = defaults.string(forKey: Keys.dockPosition),
+                  let val = DockPositionPreference(rawValue: raw) else {
+                return .system
+            }
+            return val
+        }
+        set {
+            defaults.set(newValue.rawValue, forKey: Keys.dockPosition)
+            onChange?()
+        }
+    }
+
+    func effectiveDockEdge(nativeEdgeOverride: DockScreenEdge? = nil) -> DockScreenEdge {
+        switch dockPosition {
+        case .bottom:
+            return .bottom
+        case .left:
+            return .left
+        case .right:
+            return .right
+        case .system:
+            return nativeEdgeOverride ?? Self.readNativeDockEdge()
         }
     }
 

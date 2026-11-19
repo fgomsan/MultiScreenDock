@@ -865,6 +865,98 @@ func testLightDarkAppearanceAndFullscreenDisplayDetection() {
     L10n.overrideLanguageForTesting = nil
 }
 
+// 18. Dock Position on Screen: System / Bottom / Left / Right Edge Geometry & Native Dock Overlap (#5)
+func testDockPositionLeftRightBottomGeometryAndNativeDockOverlap() {
+    let suiteName = "io.github.fgomsan.MultiScreenDock.positionTest.\(UUID().uuidString)"
+    if let suite = UserDefaults(suiteName: suiteName) {
+        defer { suite.removePersistentDomain(forName: suiteName) }
+        let s = DockSettings(defaults: suite)
+        expect(s.dockPosition == .system, "Default dockPosition must be .system")
+        expect(s.effectiveDockEdge(nativeEdgeOverride: .right) == .right, ".system must follow native right Dock")
+        expect(s.effectiveDockEdge(nativeEdgeOverride: .left) == .left, ".system must follow native left Dock")
+
+        s.dockPosition = .left
+        expect(s.dockPosition == .left, "dockPosition must persist .left")
+        expect(s.effectiveDockEdge(nativeEdgeOverride: .bottom) == .left, "Explicit .left must override native bottom")
+
+        s.dockPosition = .right
+        expect(s.dockPosition == .right, "dockPosition must persist .right")
+        expect(s.effectiveDockEdge(nativeEdgeOverride: .bottom) == .right, "Explicit .right must override native bottom")
+    }
+
+    let screen = NSRect(x: 1728, y: 0, width: 2560, height: 1440)
+    let barSz = NSSize(width: 580, height: 52) // 580 pt span along edge, 52 pt thickness
+
+    for edge in DockScreenEdge.allCases {
+        let trigNoNeighbor = DockLayoutMath.triggerZone(screenFrame: screen, barSize: barSz, hasScreenBelow: false, edge: edge)
+        let trigWithNeighbor = DockLayoutMath.triggerZone(screenFrame: screen, barSize: barSz, hasScreenBelow: true, edge: edge)
+        let keepAlive = DockLayoutMath.keepAliveZone(screenFrame: screen, barSize: barSz, bottomMargin: 6, edge: edge)
+        let dodge = DockLayoutMath.dockDodgeZone(screenFrame: screen, barSize: barSz, bottomMargin: 6, edge: edge)
+
+        expect(keepAlive.contains(trigNoNeighbor), "keepAliveZone must strictly contain triggerZone (no neighbor) on \(edge)")
+        expect(keepAlive.contains(trigWithNeighbor), "keepAliveZone must strictly contain triggerZone (with neighbor) on \(edge)")
+
+        switch edge {
+        case .bottom:
+            expect(trigNoNeighbor.minY == screen.minY && dodge.minY == screen.minY, "Bottom zones must anchor to screen.minY")
+        case .left:
+            expect(trigNoNeighbor.minX == screen.minX && dodge.minX == screen.minX, "Left zones must anchor to screen.minX")
+            expect(dodge.width == 62 && dodge.height == 588, "Left dodge zone must swap thickness (62) and vertical span (588)")
+        case .right:
+            expect(trigNoNeighbor.maxX == screen.maxX && dodge.maxX == screen.maxX, "Right zones must anchor to screen.maxX")
+            expect(dodge.width == 62 && dodge.height == 588, "Right dodge zone must swap thickness (62) and vertical span (588)")
+        }
+    }
+
+    // Native Dock visibility detection on Bottom, Left, and Right edges
+    let fullScreen = NSRect(x: 0, y: 0, width: 2560, height: 1440)
+    let visBottomDock = NSRect(x: 0, y: 70, width: 2560, height: 1345)
+    let visLeftDock = NSRect(x: 68, y: 0, width: 2492, height: 1415)
+    let visRightDock = NSRect(x: 0, y: 0, width: 2492, height: 1415)
+
+    expect(DockLayoutMath.isNativeDockVisible(on: .bottom, screenFrame: fullScreen, visibleFrame: visBottomDock), "Must detect native Dock on bottom")
+    expect(!DockLayoutMath.isNativeDockVisible(on: .right, screenFrame: fullScreen, visibleFrame: visBottomDock), "Bottom native Dock must not report visible on right")
+    expect(DockLayoutMath.isNativeDockVisible(on: .left, screenFrame: fullScreen, visibleFrame: visLeftDock), "Must detect native Dock on left")
+    expect(DockLayoutMath.isNativeDockVisible(on: .right, screenFrame: fullScreen, visibleFrame: visRightDock), "Must detect native Dock on right")
+
+    // Adjacent monitor detection across left & right edges
+    let leftMon = NSRect(x: 0, y: 0, width: 1728, height: 1117)
+    let rightMon = NSRect(x: 1728, y: 0, width: 2560, height: 1440)
+    let allMonitors = [leftMon, rightMon]
+    expect(DockLayoutMath.hasAdjacentMonitor(on: .right, targetFrame: leftMon, among: allMonitors), "leftMon must detect neighbor on its right edge")
+    expect(!DockLayoutMath.hasAdjacentMonitor(on: .left, targetFrame: leftMon, among: allMonitors), "leftMon must not detect neighbor on its outer left edge")
+    expect(DockLayoutMath.hasAdjacentMonitor(on: .left, targetFrame: rightMon, among: allMonitors), "rightMon must detect neighbor on its left edge")
+    expect(!DockLayoutMath.hasAdjacentMonitor(on: .right, targetFrame: rightMon, among: allMonitors), "rightMon must not detect neighbor on its outer right edge")
+
+    // Tile wave geometry on Left vs Right vertical edges
+    let dummyItem = DockItem(
+        id: "test-app",
+        label: "Test",
+        kind: .finder,
+        icon: NSImage(size: NSSize(width: 36, height: 36)),
+        isRunning: true,
+        isFrontmost: true
+    )
+    let tile = DockTileView(item: dummyItem, iconSize: 36, tilePadX: 2.5)
+    tile.applyWaveState(slotOriginX: 120, slotWidth: 41, magIconSize: 48, liftY: 3.0, edge: .left, rightBarMaxX: 92)
+    expect(tile.frame.origin.x == 1 && tile.frame.origin.y == 120, "Left vertical tile must anchor at x=1, y=120")
+    expect(tile.liveIconFrameInSuperview.origin.x == 13.0, "Left vertical icon must lift rightward to x = 1 + 9 + 3 = 13")
+
+    tile.applyWaveState(slotOriginX: 120, slotWidth: 41, magIconSize: 48, liftY: 3.0, edge: .right, rightBarMaxX: 92)
+    expect(tile.frame.maxX == 91 && tile.frame.origin.y == 120, "Right vertical tile must anchor its right edge at rightBarMaxX - 1 (91)")
+    expect(tile.liveIconFrameInSuperview.maxX == 79.0, "Right vertical icon must lift leftward away from right edge (92 - 10 - 3 = 79)")
+
+    for lang in AppLanguage.allCases where lang != .system {
+        L10n.overrideLanguageForTesting = lang
+        expect(!L10n.positionMenu.isEmpty, "positionMenu empty for \(lang)")
+        expect(!L10n.positionSystemAuto.isEmpty, "positionSystemAuto empty for \(lang)")
+        expect(!L10n.positionBottom.isEmpty, "positionBottom empty for \(lang)")
+        expect(!L10n.positionLeft.isEmpty, "positionLeft empty for \(lang)")
+        expect(!L10n.positionRight.isEmpty, "positionRight empty for \(lang)")
+    }
+    L10n.overrideLanguageForTesting = nil
+}
+
 @main
 struct TestRunner {
     static func main() {
@@ -885,6 +977,7 @@ struct TestRunner {
         testFanStackHitTestingFirstMouseAndDragLifecycleOnStackedMonitors()
         testSmartAutoHideWindowOverlapAndQuartzCoordinateConversion()
         testLightDarkAppearanceAndFullscreenDisplayDetection()
+        testDockPositionLeftRightBottomGeometryAndNativeDockOverlap()
 
         print("MultiScreenDock Tests: \(passedTests) passed, \(failedTests) failed.")
         if failedTests > 0 {

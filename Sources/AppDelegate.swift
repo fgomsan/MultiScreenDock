@@ -255,6 +255,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         sizeParent.submenu = sizeSubmenu
         menu.addItem(sizeParent)
 
+        // Position on Screen Submenu (System / Bottom / Left / Right)
+        let positionSubmenu = NSMenu()
+        let positionChoices: [(String, DockPositionPreference)] = [
+            (L10n.positionSystemAuto, .system),
+            (L10n.positionBottom, .bottom),
+            (L10n.positionLeft, .left),
+            (L10n.positionRight, .right)
+        ]
+        for (title, pos) in positionChoices {
+            let pItem = NSMenuItem(title: title, action: #selector(selectDockPosition(_:)), keyEquivalent: "")
+            pItem.target = self
+            pItem.representedObject = pos.rawValue
+            pItem.state = (settings.dockPosition == pos) ? .on : .off
+            positionSubmenu.addItem(pItem)
+        }
+        let positionParent = NSMenuItem(title: L10n.positionMenu, action: nil, keyEquivalent: "")
+        positionParent.submenu = positionSubmenu
+        menu.addItem(positionParent)
+
         // Appearance Submenu (System / Light / Dark)
         let appearanceSubmenu = NSMenu()
         let appearanceChoices: [(String, DockAppearanceMode)] = [
@@ -462,6 +481,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         if let raw = sender.representedObject as? String,
            let mode = DockAppearanceMode(rawValue: raw) {
             DockSettings.shared.appearanceMode = mode
+        }
+    }
+
+    @objc private func selectDockPosition(_ sender: NSMenuItem) {
+        if let raw = sender.representedObject as? String,
+           let pos = DockPositionPreference(rawValue: raw) {
+            DockSettings.shared.dockPosition = pos
         }
     }
 

@@ -651,7 +651,10 @@ final class FolderStackController {
             )
         }
 
-        switch effectiveStyle {
+        let dockEdge = activeBarPanel?.currentEdge ?? DockSettings.shared.effectiveDockEdge()
+        let finalStyle: DockStackStyle = (dockEdge.isVertical && effectiveStyle == .fan) ? .grid : effectiveStyle
+
+        switch finalStyle {
         case .fan:
             presentFanWindow(entries: entries, folderURL: current.url, on: screen, animated: animated)
         case .grid, .automatic:
@@ -1001,9 +1004,22 @@ final class FolderStackController {
         let totalW = cardWidth + shadowPad * 2
         let totalH = cardHeight + shadowPad * 2
 
-        var winOriginX = round(currentAnchorScreenRect.midX - totalW / 2)
+        let dockEdge = activeBarPanel?.currentEdge ?? DockSettings.shared.effectiveDockEdge()
+        var winOriginX: CGFloat
+        var winOriginY: CGFloat
+        switch dockEdge {
+        case .bottom:
+            winOriginX = round(currentAnchorScreenRect.midX - totalW / 2)
+            winOriginY = round(currentAnchorScreenRect.maxY + 8 - shadowPad)
+        case .left:
+            winOriginX = round(currentAnchorScreenRect.maxX + 8 - shadowPad)
+            winOriginY = round(currentAnchorScreenRect.midY - totalH / 2)
+        case .right:
+            winOriginX = round(currentAnchorScreenRect.minX - totalW - 8 + shadowPad)
+            winOriginY = round(currentAnchorScreenRect.midY - totalH / 2)
+        }
         winOriginX = max(screen.frame.minX + 6, min(winOriginX, screen.frame.maxX - totalW - 6))
-        let winOriginY = round(currentAnchorScreenRect.maxY + 8 - shadowPad)
+        winOriginY = max(screen.frame.minY + 6, min(winOriginY, screen.frame.maxY - totalH - 6))
         let winFrame = NSRect(x: winOriginX, y: winOriginY, width: totalW, height: totalH)
 
         let outerRoot = NSView(frame: NSRect(origin: .zero, size: winFrame.size))

@@ -957,6 +957,66 @@ func testDockPositionLeftRightBottomGeometryAndNativeDockOverlap() {
     L10n.overrideLanguageForTesting = nil
 }
 
+// 19. Mac App Store Build Menu Compliance (Guidelines 2.5.2 & 3.1.1) and App Sandbox Fallback
+func testMacAppStoreMenuComplianceAndSandboxFallbackApps() {
+    let suiteName = "io.github.fgomsan.MultiScreenDock.masTest.\(UUID().uuidString)"
+    if let suite = UserDefaults(suiteName: suiteName) {
+        defer { suite.removePersistentDomain(forName: suiteName) }
+        let s = DockSettings(defaults: suite)
+        expect(s.dockPlistBookmarkData == nil, "dockPlistBookmarkData must default to nil")
+        let sampleData = Data([0x42, 0x4D, 0x4B])
+        s.dockPlistBookmarkData = sampleData
+        expect(s.dockPlistBookmarkData == sampleData, "dockPlistBookmarkData must persist Data")
+        s.dockPlistBookmarkData = nil
+        expect(s.dockPlistBookmarkData == nil, "dockPlistBookmarkData must clear when set to nil")
+    }
+
+    let fallbackApps = DockModelReader.defaultFallbackPersistentApps()
+    expect(!fallbackApps.isEmpty, "defaultFallbackPersistentApps must return installed standard macOS apps")
+    for app in fallbackApps {
+        expect(!app.label.isEmpty, "Fallback app label must not be empty")
+        expect(FileManager.default.fileExists(atPath: app.url.path), "Fallback app URL must exist on disk: \(app.url.path)")
+    }
+    expect(
+        FileManager.default.fileExists(atPath: DockModelReader.realUserHomeDirectoryURL.path),
+        "realUserHomeDirectoryURL must resolve to an existing directory"
+    )
+
+    let appDelegate = AppDelegate()
+    defer {
+        DockSettings.overrideIsAppStoreBuildForTesting = nil
+        DockSettings.overrideIsSandboxedForTesting = nil
+    }
+
+    // Standard GitHub / Homebrew build
+    DockSettings.overrideIsAppStoreBuildForTesting = false
+    DockSettings.overrideIsSandboxedForTesting = false
+    let standardMenu = appDelegate.buildFreshSettingsMenu(includeShortcuts: false)
+    let standardTitles = Set(standardMenu.items.map { $0.title })
+    expect(standardTitles.contains(L10n.checkForUpdates), "Standard build must include Check for Updates")
+    expect(standardTitles.contains(L10n.autoCheckUpdates), "Standard build must include Auto Check Updates")
+    expect(standardTitles.contains(L10n.buyMeACoffee), "Standard build must include Buy Me a Coffee")
+    expect(!standardTitles.contains(L10n.authorizeNativeDockSync), "Non-sandboxed build must not show sandbox import prompt")
+
+    // Mac App Store + App Sandbox build
+    DockSettings.overrideIsAppStoreBuildForTesting = true
+    DockSettings.overrideIsSandboxedForTesting = true
+    let masMenu = appDelegate.buildFreshSettingsMenu(includeShortcuts: false)
+    let masTitles = Set(masMenu.items.map { $0.title })
+    expect(!masTitles.contains(L10n.checkForUpdates), "MAS build must omit external updater (Guideline 2.5.2)")
+    expect(!masTitles.contains(L10n.autoCheckUpdates), "MAS build must omit auto-update toggle (Guideline 2.5.2)")
+    expect(!masTitles.contains(L10n.buyMeACoffee), "MAS build must omit external donation link (Guideline 3.1.1)")
+    expect(masTitles.contains(L10n.authorizeNativeDockSync), "Sandboxed MAS build must include Import Pinned Apps from macOS Dock")
+
+    for lang in AppLanguage.allCases where lang != .system {
+        L10n.overrideLanguageForTesting = lang
+        expect(!L10n.authorizeNativeDockSync.isEmpty, "authorizeNativeDockSync empty for \(lang)")
+        expect(!L10n.authorizeDockSyncPanelMessage.isEmpty, "authorizeDockSyncPanelMessage empty for \(lang)")
+        expect(!L10n.authorizeDockSyncPanelPrompt.isEmpty, "authorizeDockSyncPanelPrompt empty for \(lang)")
+    }
+    L10n.overrideLanguageForTesting = nil
+}
+
 @main
 struct TestRunner {
     static func main() {
@@ -978,6 +1038,7 @@ struct TestRunner {
         testSmartAutoHideWindowOverlapAndQuartzCoordinateConversion()
         testLightDarkAppearanceAndFullscreenDisplayDetection()
         testDockPositionLeftRightBottomGeometryAndNativeDockOverlap()
+        testMacAppStoreMenuComplianceAndSandboxFallbackApps()
 
         print("MultiScreenDock Tests: \(passedTests) passed, \(failedTests) failed.")
         if failedTests > 0 {

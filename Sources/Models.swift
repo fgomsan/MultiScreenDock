@@ -140,14 +140,139 @@ final class DockModelReader {
     private var cachedPersistentApps: [(label: String, bundleID: String?, url: URL)] = []
     private var cachedPersistentOthers: [(label: String, url: URL, isDirectory: Bool, stackConfig: DockFolderStackConfig?)] = []
     private var cachedTrashFullFromPlist: Bool = false
+    private(set) var hasLoadedRealDockPlist: Bool = false
+
+    static var realUserHomeDirectoryURL: URL {
+        if let pw = getpwuid(getuid()), let dirPtr = pw.pointee.pw_dir {
+            let path = String(cString: dirPtr)
+            if !path.isEmpty {
+                return URL(fileURLWithPath: path, isDirectory: true)
+            }
+        }
+        return FileManager.default.homeDirectoryForCurrentUser
+    }
+
+    static var realUserPreferencesDirectoryURL: URL {
+        realUserHomeDirectoryURL.appendingPathComponent("Library/Preferences", isDirectory: true)
+    }
 
     private let dockPlistURL: URL = {
-        FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent("Library/Preferences/com.apple.dock.plist")
+        DockModelReader.realUserPreferencesDirectoryURL
+            .appendingPathComponent("com.apple.dock.plist")
     }()
 
     private init() {
         reloadPlistCache()
+    }
+
+    /// Standard macOS applications used as an immediate out-of-the-box fallback when running inside
+    /// an App Sandbox container before the user has authorized `com.apple.dock.plist`.
+    static func defaultFallbackPersistentApps() -> [(label: String, bundleID: String?, url: URL)] {
+        let candidates: [(bundleID: String, paths: [String])] = [
+            ("com.apple.Safari", [
+                "/Applications/Safari.app",
+                "/System/Volumes/Preboot/Cryptexes/App/System/Applications/Safari.app"
+            ]),
+            ("com.apple.mail", ["/System/Applications/Mail.app"]),
+            ("com.apple.MobileSMS", ["/System/Applications/Messages.app"]),
+            ("com.apple.iCal", ["/System/Applications/Calendar.app"]),
+            ("com.apple.Notes", ["/System/Applications/Notes.app"]),
+            ("com.apple.Music", ["/System/Applications/Music.app"]),
+            ("com.apple.systempreferences", ["/System/Applications/System Settings.app"])
+        ]
+
+        let fm = FileManager.default
+        var results: [(label: String, bundleID: String?, url: URL)] = []
+        for candidate in candidates {
+            var resolvedURL: URL?
+            for path in candidate.paths where fm.fileExists(atPath: path) {
+                resolvedURL = URL(fileURLWithPath: path)
+                break
+            }
+            if resolvedURL == nil {
+                resolvedURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: candidate.bundleID)
+            }
+            guard let appURL = resolvedURL, fm.fileExists(atPath: appURL.path) else { continue }
+            let rawName = fm.displayName(atPath: appURL.path)
+            let label = rawName.hasSuffix(".app")
+                ? String(rawName.dropLast(4))
+                : appURL.deletingPathExtension().lastPathComponent
+            results.append((label: label, bundleID: candidate.bundleID, url: appURL))
+        }
+        return results
+    }
+
+    private func loadDockPlistDataAndModDate() -> (data: Data, modDate: Date?)? {
+        if let bookmarkData = DockSettings.shared.dockPlistBookmarkData {
+            var isStale = false
+            if let bookmarkedURL = try? URL(
+                resolvingBookmarkData: bookmarkData,
+                options: [.withSecurityScope, .withoutUI],
+                relativeTo: nil,
+                bookmarkDataIsStale: &isStale
+            ) {
+                let didStart = bookmarkedURL.startAccessingSecurityScopedResource()
+                defer {
+                    if didStart {
+                        bookmarkedURL.stopAccessingSecurityScopedResource()
+                    }
+                }
+                let targetURL: URL
+                var isDir: ObjCBool = false
+                if FileManager.default.fileExists(atPath: bookmarkedURL.path, isDirectory: &isDir), isDir.boolValue {
+                    targetURL = bookmarkedURL.appendingPathComponent("com.apple.dock.plist")
+                } else {
+                    targetURL = bookmarkedURL
+                }
+                if let data = try? Data(contentsOf: targetURL) {
+                    let attrs = try? FileManager.default.attributesOfItem(atPath: targetURL.path)
+                    let modDate = attrs?[.modificationDate] as? Date
+                    if isStale,
+                       let refreshed = try? bookmarkedURL.bookmarkData(
+                           options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
+                           includingResourceValuesForKeys: nil,
+                           relativeTo: nil
+                       ) {
+                        DockSettings.shared.dockPlistBookmarkData = refreshed
+                    }
+                    return (data: data, modDate: modDate)
+                }
+            }
+        }
+
+        if let data = try? Data(contentsOf: dockPlistURL) {
+            let attrs = try? FileManager.default.attributesOfItem(atPath: dockPlistURL.path)
+            let modDate = attrs?[.modificationDate] as? Date
+            return (data: data, modDate: modDate)
+        }
+        return nil
+    }
+
+    @discardableResult
+    func promptToAuthorizeNativeDockPlist() -> Bool {
+        NSApp.activate(ignoringOtherApps: true)
+        let panel = NSOpenPanel()
+        panel.title = L10n.authorizeNativeDockSync
+        panel.message = L10n.authorizeDockSyncPanelMessage
+        panel.prompt = L10n.authorizeDockSyncPanelPrompt
+        panel.directoryURL = Self.realUserPreferencesDirectoryURL
+        panel.showsHiddenFiles = true
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+
+        guard panel.runModal() == .OK, let selectedURL = panel.url else {
+            return false
+        }
+        if let bookmark = try? selectedURL.bookmarkData(
+            options: [.withSecurityScope, .securityScopeAllowOnlyReadAccess],
+            includingResourceValuesForKeys: nil,
+            relativeTo: nil
+        ) {
+            DockSettings.shared.dockPlistBookmarkData = bookmark
+        }
+        reloadPlistCache(clearIcons: true)
+        return hasLoadedRealDockPlist
     }
 
     /// Parses a `file-data` dictionary from `com.apple.dock.plist`, supporting both `_CFURLStringType = 15`
@@ -178,8 +303,16 @@ final class DockModelReader {
 
     @discardableResult
     func checkPlistChangedAndReloadIfNeeded() -> Bool {
-        guard let attrs = try? FileManager.default.attributesOfItem(atPath: dockPlistURL.path),
-              let modDate = attrs[.modificationDate] as? Date else {
+        if let attrs = try? FileManager.default.attributesOfItem(atPath: dockPlistURL.path),
+           let modDate = attrs[.modificationDate] as? Date {
+            if lastPlistModDate != modDate {
+                reloadPlistCache()
+                return true
+            }
+            return false
+        }
+        guard let loaded = loadDockPlistDataAndModDate(),
+              let modDate = loaded.modDate else {
             return false
         }
         if lastPlistModDate != modDate {
@@ -193,14 +326,17 @@ final class DockModelReader {
         if clearIcons {
             iconCache.removeAll()
         }
-        if let attrs = try? FileManager.default.attributesOfItem(atPath: dockPlistURL.path),
-           let modDate = attrs[.modificationDate] as? Date {
-            lastPlistModDate = modDate
-        }
-
-        guard let data = try? Data(contentsOf: dockPlistURL),
-              let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any] else {
+        guard let loaded = loadDockPlistDataAndModDate(),
+              let plist = try? PropertyListSerialization.propertyList(from: loaded.data, options: [], format: nil) as? [String: Any] else {
+            hasLoadedRealDockPlist = false
+            if cachedPersistentApps.isEmpty {
+                cachedPersistentApps = Self.defaultFallbackPersistentApps()
+            }
             return
+        }
+        hasLoadedRealDockPlist = true
+        if let modDate = loaded.modDate {
+            lastPlistModDate = modDate
         }
 
         cachedTrashFullFromPlist = (plist["trash-full"] as? Bool) ?? false

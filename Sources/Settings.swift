@@ -110,6 +110,26 @@ final class DockSettings {
     static let bundleIdentifier = "io.github.fgomsan.MultiScreenDock"
     static let launchAgentLabel = "io.github.fgomsan.multiscreendock"
 
+    #if APP_STORE
+    static let isAppStoreBuild = true
+    #else
+    static let isAppStoreBuild = false
+    #endif
+
+    static var overrideIsAppStoreBuildForTesting: Bool?
+    static var effectiveIsAppStoreBuild: Bool {
+        overrideIsAppStoreBuildForTesting ?? isAppStoreBuild
+    }
+
+    static var isSandboxed: Bool {
+        ProcessInfo.processInfo.environment["APP_SANDBOX_CONTAINER_ID"] != nil
+    }
+
+    static var overrideIsSandboxedForTesting: Bool?
+    static var effectiveIsSandboxed: Bool {
+        overrideIsSandboxedForTesting ?? isSandboxed
+    }
+
     private let defaults: UserDefaults
 
     private enum Keys {
@@ -130,6 +150,7 @@ final class DockSettings {
         static let folderStackStyle = "folderStackStyle"
         static let appearanceMode = "appearanceMode"
         static let dockPosition = "dockPosition"
+        static let dockPlistBookmarkData = "dockPlistBookmarkData"
         static let didMigrateFullScreenDefaultV143 = "didMigrateFullScreenDefaultV143"
     }
 
@@ -359,6 +380,18 @@ final class DockSettings {
         }
     }
 
+    var dockPlistBookmarkData: Data? {
+        get { defaults.data(forKey: Keys.dockPlistBookmarkData) }
+        set {
+            if let data = newValue {
+                defaults.set(data, forKey: Keys.dockPlistBookmarkData)
+            } else {
+                defaults.removeObject(forKey: Keys.dockPlistBookmarkData)
+            }
+            onChange?()
+        }
+    }
+
     func effectiveDockEdge(nativeEdgeOverride: DockScreenEdge? = nil) -> DockScreenEdge {
         switch dockPosition {
         case .bottom:
@@ -577,6 +610,12 @@ final class DockSettings {
     }
 
     func setNativeDockAutohide(_ enabled: Bool) {
+        if Self.effectiveIsSandboxed {
+            if let url = URL(string: "x-apple.systempreferences:com.apple.Desktop-Settings.extension") {
+                NSWorkspace.shared.open(url)
+            }
+            return
+        }
         let scriptSource = "tell application \"System Events\" to set autohide of dock preferences to \(enabled ? "true" : "false")"
         var scriptErr: NSDictionary?
         if let script = NSAppleScript(source: scriptSource) {

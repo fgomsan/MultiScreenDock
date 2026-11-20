@@ -599,6 +599,45 @@ enum L10n {
         )
     }
 
+    static var authorizeNativeDockSync: String {
+        tr(
+            en: "Import Pinned Apps from macOS Dock…",
+            es: "Importar iconos anclados del Dock de macOS…",
+            fr: "Importer les apps épinglées du Dock macOS…",
+            de: "Angeheftete Apps aus dem macOS-Dock importieren…",
+            pt: "Importar apps fixados do Dock do macOS…",
+            it: "Importa app mantenute dal Dock di macOS…",
+            ja: "macOS標準Dockの固定アプリを読み込む…",
+            zh: "从 macOS 原生程序坞导入固定应用…"
+        )
+    }
+
+    static var authorizeDockSyncPanelMessage: String {
+        tr(
+            en: "Select com.apple.dock.plist (or your Library/Preferences folder) so MultiScreenDock can mirror your pinned macOS Dock apps.",
+            es: "Selecciona com.apple.dock.plist (o tu carpeta Library/Preferences) para que MultiScreenDock sincronice tus iconos anclados del Dock de macOS.",
+            fr: "Sélectionnez com.apple.dock.plist (ou le dossier Library/Preferences) pour synchroniser vos applications épinglées au Dock macOS.",
+            de: "Wähle com.apple.dock.plist (oder den Ordner Library/Preferences), damit MultiScreenDock deine angehefteten macOS-Dock-Apps spiegeln kann.",
+            pt: "Selecione com.apple.dock.plist (ou a pasta Library/Preferences) para que o MultiScreenDock sincronize seus apps fixados no Dock do macOS.",
+            it: "Seleziona com.apple.dock.plist (o la cartella Library/Preferences) affinché MultiScreenDock sincronizzi le app mantenute nel Dock di macOS.",
+            ja: "macOS標準Dockの固定アプリを同期するため、com.apple.dock.plist（または Library/Preferences フォルダ）を選択してください。",
+            zh: "请选择 com.apple.dock.plist（或 Library/Preferences 文件夹），以便 MultiScreenDock 同步您在 macOS 程序坞中固定的应用。"
+        )
+    }
+
+    static var authorizeDockSyncPanelPrompt: String {
+        tr(
+            en: "Sync Dock",
+            es: "Sincronizar Dock",
+            fr: "Synchroniser le Dock",
+            de: "Dock synchronisieren",
+            pt: "Sincronizar Dock",
+            it: "Sincronizza Dock",
+            ja: "Dockを同期",
+            zh: "同步程序坞"
+        )
+    }
+
     static var launchAtLogin: String {
         tr(
             en: "Launch at Login",

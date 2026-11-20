@@ -4,6 +4,10 @@ set -euo pipefail
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_NAME="MultiScreenDock"
 FINAL_APP_BUNDLE="${PROJECT_DIR}/${APP_NAME}.app"
+MAS_BUILD=false
+if [[ "${1:-}" == "--mas" ]]; then
+    MAS_BUILD=true
+fi
 BUILD_TMP="$(mktemp -d "${TMPDIR:-/tmp}/multiscreendock_build.XXXXXX")"
 trap 'rm -rf "${BUILD_TMP}"' EXIT
 
@@ -142,12 +146,16 @@ cat > "${CONTENTS_DIR}/Info.plist" << 'EOF'
     <string>1.5.0</string>
     <key>CFBundleVersion</key>
     <string>14</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.utilities</string>
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>LSUIElement</key>
     <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
     <key>NSAppleEventsUsageDescription</key>
     <string>MultiScreenDock uses System Events to open Finder windows, empty the Trash, or toggle Apple's native Dock auto-hide when requested.</string>
 </dict>
@@ -168,16 +176,33 @@ SOURCES=(
 )
 
 FRAMEWORKS=(-framework Cocoa -framework QuartzCore -framework ColorSync -framework ServiceManagement -framework QuickLookThumbnailing)
+SWIFT_FLAGS=()
+if [[ "${MAS_BUILD}" == "true" ]]; then
+    echo "   (Mac App Store build mode: -DAPP_STORE + App Sandbox entitlements)"
+    SWIFT_FLAGS+=(-DAPP_STORE)
+fi
 
-swiftc -O -target arm64-apple-macos13.0 "${FRAMEWORKS[@]}" "${SOURCES[@]}" -o "${BUILD_TMP}/${APP_NAME}-arm64"
-swiftc -O -target x86_64-apple-macos13.0 -Xlinker -w "${FRAMEWORKS[@]}" "${SOURCES[@]}" -o "${BUILD_TMP}/${APP_NAME}-x86_64"
+swiftc -O "${SWIFT_FLAGS[@]}" -target arm64-apple-macos13.0 "${FRAMEWORKS[@]}" "${SOURCES[@]}" -o "${BUILD_TMP}/${APP_NAME}-arm64"
+swiftc -O "${SWIFT_FLAGS[@]}" -target x86_64-apple-macos13.0 -Xlinker -w "${FRAMEWORKS[@]}" "${SOURCES[@]}" -o "${BUILD_TMP}/${APP_NAME}-x86_64"
 lipo -create -output "${MACOS_DIR}/${APP_NAME}" "${BUILD_TMP}/${APP_NAME}-arm64" "${BUILD_TMP}/${APP_NAME}-x86_64"
 
 xattr -cr "${APP_BUNDLE}"
 CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
-codesign --force --deep --sign "${CODESIGN_IDENTITY}" "${APP_BUNDLE}"
+if [[ "${MAS_BUILD}" == "true" ]]; then
+    ENTITLEMENTS_PATH="${PROJECT_DIR}/packaging/mas/MultiScreenDock-MAS.entitlements"
+    codesign --force --deep --entitlements "${ENTITLEMENTS_PATH}" --sign "${CODESIGN_IDENTITY}" "${APP_BUNDLE}"
+else
+    codesign --force --deep --sign "${CODESIGN_IDENTITY}" "${APP_BUNDLE}"
+fi
 
 rm -rf "${FINAL_APP_BUNDLE}"
 ditto "${APP_BUNDLE}" "${FINAL_APP_BUNDLE}"
+
+if [[ "${MAS_BUILD}" == "true" && -n "${MAS_INSTALLER_IDENTITY:-}" ]]; then
+    PKG_PATH="${PROJECT_DIR}/${APP_NAME}-MAS.pkg"
+    rm -f "${PKG_PATH}"
+    productbuild --component "${FINAL_APP_BUNDLE}" /Applications --sign "${MAS_INSTALLER_IDENTITY}" "${PKG_PATH}"
+    echo "Mac App Store package ready: ${PKG_PATH}"
+fi
 
 echo "Build complete: ${FINAL_APP_BUNDLE}"

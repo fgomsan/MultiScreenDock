@@ -24,10 +24,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         setupStatusItem()
-        UpdateChecker.shared.onUpdateStateChange = { [weak self] in
-            self?.refreshStatusItemIndicator()
+        if !DockSettings.effectiveIsAppStoreBuild {
+            UpdateChecker.shared.onUpdateStateChange = { [weak self] in
+                self?.refreshStatusItemIndicator()
+            }
+            UpdateChecker.shared.startAutomaticChecksIfEnabled()
         }
-        UpdateChecker.shared.startAutomaticChecksIfEnabled()
         MultiScreenController.shared.start()
     }
 
@@ -56,7 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func refreshStatusItemIndicator() {
         guard let button = statusItem?.button else { return }
-        let hasUpdate = (UpdateChecker.shared.availableUpdate != nil)
+        let hasUpdate = !DockSettings.effectiveIsAppStoreBuild && (UpdateChecker.shared.availableUpdate != nil)
         if button.image != nil {
             button.title = hasUpdate ? " •" : ""
         } else {
@@ -93,7 +95,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         header.isEnabled = false
         menu.addItem(header)
 
-        if let available = UpdateChecker.shared.availableUpdate {
+        if !DockSettings.effectiveIsAppStoreBuild,
+           let available = UpdateChecker.shared.availableUpdate {
             let updateBannerItem = NSMenuItem(
                 title: L10n.updateAvailableMenu(available.version),
                 action: #selector(showAvailableUpdate),
@@ -363,6 +366,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        if DockSettings.effectiveIsSandboxed {
+            let authorizeItem = NSMenuItem(
+                title: L10n.authorizeNativeDockSync,
+                action: #selector(authorizeNativeDockSync),
+                keyEquivalent: ""
+            )
+            authorizeItem.target = self
+            if let icon = NSImage(systemSymbolName: "folder.badge.gearshape", accessibilityDescription: nil) {
+                icon.isTemplate = true
+                authorizeItem.image = icon
+            }
+            menu.addItem(authorizeItem)
+        }
+
         let reloadItem = NSMenuItem(title: L10n.syncNow, action: #selector(reloadNow), keyEquivalent: includeShortcuts ? "r" : "")
         reloadItem.target = self
         menu.addItem(reloadItem)
@@ -376,18 +393,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         loginItem.state = loginStatus ? .on : .off
         menu.addItem(loginItem)
 
-        let checkUpdatesItem = NSMenuItem(title: L10n.checkForUpdates, action: #selector(checkUpdatesNow), keyEquivalent: "")
-        checkUpdatesItem.target = self
-        if let badge = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: nil) {
-            badge.isTemplate = true
-            checkUpdatesItem.image = badge
-        }
-        menu.addItem(checkUpdatesItem)
+        if !DockSettings.effectiveIsAppStoreBuild {
+            let checkUpdatesItem = NSMenuItem(title: L10n.checkForUpdates, action: #selector(checkUpdatesNow), keyEquivalent: "")
+            checkUpdatesItem.target = self
+            if let badge = NSImage(systemSymbolName: "arrow.triangle.2.circlepath", accessibilityDescription: nil) {
+                badge.isTemplate = true
+                checkUpdatesItem.image = badge
+            }
+            menu.addItem(checkUpdatesItem)
 
-        let autoUpdatesItem = NSMenuItem(title: L10n.autoCheckUpdates, action: #selector(toggleAutoCheckUpdates), keyEquivalent: "")
-        autoUpdatesItem.target = self
-        autoUpdatesItem.state = settings.autoCheckUpdates ? .on : .off
-        menu.addItem(autoUpdatesItem)
+            let autoUpdatesItem = NSMenuItem(title: L10n.autoCheckUpdates, action: #selector(toggleAutoCheckUpdates), keyEquivalent: "")
+            autoUpdatesItem.target = self
+            autoUpdatesItem.state = settings.autoCheckUpdates ? .on : .off
+            menu.addItem(autoUpdatesItem)
+        }
 
         menu.addItem(.separator())
 
@@ -399,13 +418,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         menu.addItem(feedbackItem)
 
-        let coffeeItem = NSMenuItem(title: L10n.buyMeACoffee, action: #selector(openBuyMeACoffee), keyEquivalent: "")
-        coffeeItem.target = self
-        if let cup = NSImage(systemSymbolName: "cup.and.saucer", accessibilityDescription: nil) {
-            cup.isTemplate = true
-            coffeeItem.image = cup
+        if !DockSettings.effectiveIsAppStoreBuild {
+            let coffeeItem = NSMenuItem(title: L10n.buyMeACoffee, action: #selector(openBuyMeACoffee), keyEquivalent: "")
+            coffeeItem.target = self
+            if let cup = NSImage(systemSymbolName: "cup.and.saucer", accessibilityDescription: nil) {
+                cup.isTemplate = true
+                coffeeItem.image = cup
+            }
+            menu.addItem(coffeeItem)
         }
-        menu.addItem(coffeeItem)
 
         menu.addItem(.separator())
 
@@ -500,6 +521,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func reloadNow() {
         DockModelReader.shared.reloadPlistCache(clearIcons: true)
         MultiScreenController.shared.refreshAll(forceLayout: true)
+    }
+
+    @objc private func authorizeNativeDockSync() {
+        if DockModelReader.shared.promptToAuthorizeNativeDockPlist() {
+            MultiScreenController.shared.refreshAll(forceLayout: true)
+        }
     }
 
     @objc private func toggleLaunchAtLogin() {

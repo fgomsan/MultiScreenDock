@@ -12,6 +12,13 @@
 
 **El Dock de macOS solo aparece en una pantalla.** MultiScreenDock mantiene una copia en vivo en cada monitor, también en pantallas apiladas arriba, donde el Dock del sistema no puede salir. [Guía breve en español](#español).
 
+## What's New in v1.5.0
+
+- **Bottom, Left & Right Dock Positions (`Position on Screen`):** Automatically follows your native macOS Dock orientation (`orientation` in `com.apple.dock.plist`) or lets you pin MultiScreenDock to **Bottom**, **Left**, or **Right** — with full vertical 120 Hz raised-cosine magnification, inward icon lift/bounce, horizontal divider lines, side-anchored Hover Bubbles & Folder Stacks (**Fan**, **Grid**, and **List**), and edge-aware native Dock overlap detection on all 3 edges.
+- **Light Glass & Dark Glass Appearance (`Appearance`):** Automatically follows macOS Light and Dark Mode live (`AppleInterfaceThemeChangedNotification`) or locks to **Light Glass** (translucent `.aqua` frosted glass with dark charcoal running dots) or **Dark Glass** (`.darkAqua` HUD glass).
+- **Per-Display Fullscreen Auto-Suppression:** Detects fullscreen apps and videos per monitor via `CGWindowListCopyWindowInfo` and automatically hides the Dock on that display (`Allow on full-screen apps` now defaults to `Off`) while keeping your Docks active on all other monitors.
+- **2,233 Automated CI Assertions:** Expanded test suite covering horizontal & vertical wave geometry, edge triggers, twin-monitor EDID disambiguation, and Mac App Store / App Sandbox compliance.
+
 ![MultiScreenDock mostrando el Dock en todos los monitores](docs/demo.gif)
 
 <p align="center">
@@ -78,9 +85,11 @@ The menu-bar icon, a right-click on the bar, or **MultiScreenDock Settings** on 
 | Hover reveal sensitivity | Fast, balanced, or relaxed dwell and hide delay | Balanced |
 | Skip primary display | Leave the display that hosts the system Dock alone | On |
 | Auto-hide Apple's native Dock | Asks System Events to toggle the system Dock's auto-hide | Off |
-| Avoid overlapping the native Dock | Hide the extra bar on a display whose bottom `visibleFrame` is inset | On |
-| Allow on full-screen apps | Join full-screen spaces (`fullScreenAuxiliary`) | On |
-| Smooth hover magnification | Continuous 120 Hz raised-cosine wave across neighboring icons | On |
+| Avoid overlapping the native Dock | Hide the extra bar on a display where the native Dock is visible on the active edge | On |
+| Allow on full-screen apps | Join full-screen spaces (`fullScreenAuxiliary`) instead of auto-suppressing on fullscreen monitors | Off |
+| Smooth hover magnification | Continuous 120 Hz raised-cosine wave across neighboring icons (horizontal & vertical) | On |
+| Position on Screen | Same as macOS Dock (Auto), Bottom, Left, or Right | Same as macOS Dock (Auto) |
+| Appearance | System (Follow macOS Light / Dark), Light Glass, or Dark Glass | System |
 | Folder stacks style | Follow macOS Dock (`Fan` / `Grid` / `List`), or override globally | macOS Dock default |
 | Show running unpinned apps | Append regular running apps that are not pinned | On |
 | Icon size | 28, 36, 44, or 52 pt | The system Dock's tile size, when that value is between 20 and 80 |
@@ -141,11 +150,10 @@ brew uninstall --cask --zap multiscreendock
 
 ## Limitations
 
-- The bar is always centered on the **bottom** edge. A system Dock pinned to the left or right edge is not mirrored, and overlap detection only looks at the bottom `visibleFrame` inset.
 - This is a separate panel, not Apple's Dock process. There is no multi-bounce launch animation, no notification badge count, no inline Safari/App Store download progress bar, no web URL tiles (`url-tile`), and no Dock spacers.
 - Dropping files on a folder **moves** them on the same volume (`FileManager.moveItem`) and **copies** them when Option-dragging or dropping across volumes (`FileManager.copyItem`). If a destination name collision or permission error occurs, the source file stays intact and an alert reports which items failed.
-- **Upper** / **Lower** in the displays menu and the stacked-display dwell both derive from actual vertical display adjacency (`hasMonitorDirectlyBelow` / `hasMonitorDirectlyAbove`).
-- The full-screen setting adds `fullScreenAuxiliary` at Dock window level. Some exclusive full-screen windows still cover the bar.
+- **Upper** / **Lower** in the displays menu and the stacked-display/side-by-side crossing dwell derive from actual display adjacency (`hasAdjacentMonitor`).
+- By default, **Allow on full-screen apps** is off and MultiScreenDock automatically suppresses the Dock on any monitor currently showing a fullscreen window. If enabled, it adds `fullScreenAuxiliary` at Dock window level (some exclusive full-screen games may still cover the bar).
 - "Sync" follows the Dock plist and `NSWorkspace` notifications. It is not a private Dock API. A plist change is picked up on the next 0.8 second timer tick, or immediately (clearing cached icons) from **Sync Dock Icons Now**.
 - While the pointer is moving, auto-hide evaluates at most about 60 times a second. A timer also fires every 0.8 seconds: it reloads icons when the Dock plist or the native Dock's bottom inset changed, and otherwise re-checks the pointer in auto-hide mode.
 - Interface strings are included for 8 languages (English, Spanish, French, German, Portuguese, Italian, Japanese, and Simplified Chinese). Other system locales fall back to English unless overridden in the **Language** submenu.
@@ -168,7 +176,7 @@ Not for this code. No Accessibility trust prompt is part of launch. Automation p
 Pinned apps and folders are re-read when `com.apple.dock.plist` changes. The in-app icon size is independent after you pick a size; the first launch copies the system tile size when it falls between 20 and 80 pt.
 
 **Can I put the bar on the left or the right?**
-No. Geometry, hit testing, and the reveal strip are bottom-edge only.
+Yes! Starting with `v1.5.0`, MultiScreenDock automatically follows your native macOS Dock orientation (**Bottom**, **Left**, or **Right**), or you can override it manually under **Position on Screen**.
 
 **Is the Homebrew cask live?**
 Yes, via the official tap (`brew tap fgomsan/tap && brew install --cask multiscreendock`). The cask definition is also mirrored in [`packaging/homebrew/multiscreendock.rb`](packaging/homebrew/multiscreendock.rb).
@@ -177,7 +185,12 @@ Yes, via the official tap (`brew tap fgomsan/tap && brew install --cask multiscr
 
 MultiScreenDock es una app de barra de menús, en Swift/AppKit, sin dependencias. Muestra en cada monitor una barra sincronizada con tu Dock: Finder, apps fijadas, apps abiertas no fijadas (con un punto; más brillante si están delante), archivos y carpetas fijados, y la Papelera. El monitor principal se omite por defecto para no tapar el Dock del sistema.
 
-En pantallas apiladas, el borde inferior del monitor de arriba no es un tope físico. La barra espera un poco más en ese borde (90, 150 o 250 ms según la sensibilidad) para no abrirse cuando el cursor solo está de paso hacia el monitor de abajo.
+En pantallas apiladas o contiguas, cuando el borde activo comparte frontera con otro monitor, la barra espera un poco más en ese borde (90, 150 o 250 ms según la sensibilidad) para no abrirse cuando el cursor solo está de paso hacia la otra pantalla.
+
+**Novedades en v1.5.0:**
+- **Posición Abajo, Izquierda o Derecha (`Posición en pantalla`):** Sigue automáticamente la orientación de tu Dock de macOS o fíjalo abajo, a la izquierda o a la derecha, con ola cosenoidal vertical a 120 Hz y etiquetas/carpetas desplegadas hacia el interior de la pantalla.
+- **Cristal Claro y Cristal Oscuro (`Apariencia`):** Se adapta en vivo al Modo Claro y Oscuro de macOS o permite elegir manualmente Cristal claro o Cristal oscuro.
+- **Ocultación automática en pantalla completa por monitor:** Se oculta automáticamente en el monitor donde tengas un vídeo o app a pantalla completa mientras sigue activo en el resto de pantallas.
 
 **Instalación.** Con Homebrew:
 
@@ -194,7 +207,7 @@ O descarga [`MultiScreenDock-v1.5.0-macOS.zip`](https://github.com/fgomsan/Multi
 
 **Desinstalar.** Desactiva **Abrir automáticamente al iniciar sesión** en el menú (si estaba activo), sal de la app y borra `MultiScreenDock.app`. Los ajustes están en `~/Library/Preferences/io.github.fgomsan.MultiScreenDock.plist`.
 
-La barra solo existe en el borde inferior. Incluye aumento continuo en onda cosenoidal a 120 Hz con bloqueo focal bajo el puntero, pilas de carpetas desplegables y selector de idioma en vivo (8 idiomas) en el menú; no reproduce globos numéricos de notificación ni barras de progreso de descarga.
+Soporta los bordes inferior, izquierdo y derecho, aumento continuo en onda cosenoidal a 120 Hz con bloqueo focal bajo el puntero, apariencia en Cristal claro y oscuro, pilas de carpetas desplegables y selector de idioma en vivo (8 idiomas) en el menú; no reproduce globos numéricos de notificación ni barras de progreso de descarga.
 
 ## Support
 

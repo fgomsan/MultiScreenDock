@@ -53,51 +53,174 @@ for (name, px) in sizes {
         bitsPerPixel: 0
     )!
     NSGraphicsContext.saveGraphicsState()
-    NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+    let ctx = NSGraphicsContext(bitmapImageRep: rep)!
+    NSGraphicsContext.current = ctx
+    let cg = ctx.cgContext
 
     let s = CGFloat(px)
-    let inset = s * 0.08
+    let inset = s * 0.082
     let bgRect = NSRect(x: inset, y: inset, width: s - inset * 2, height: s - inset * 2)
-    let path = NSBezierPath(roundedRect: bgRect, xRadius: s * 0.22, yRadius: s * 0.22)
+    let cornerR = bgRect.width * 0.225
+    let squircle = NSBezierPath(roundedRect: bgRect, xRadius: cornerR, yRadius: cornerR)
 
-    let grad = NSGradient(colors: [
-        NSColor(calibratedRed: 0.09, green: 0.34, blue: 0.78, alpha: 1.0),
-        NSColor(calibratedRed: 0.05, green: 0.14, blue: 0.38, alpha: 1.0)
+    cg.saveGState()
+    let shadow = NSShadow()
+    shadow.shadowColor = NSColor(calibratedWhite: 0.0, alpha: 0.38)
+    shadow.shadowOffset = NSSize(width: 0, height: -s * 0.022)
+    shadow.shadowBlurRadius = s * 0.045
+    shadow.set()
+    NSColor(calibratedRed: 0.05, green: 0.14, blue: 0.35, alpha: 1.0).setFill()
+    squircle.fill()
+    cg.restoreGState()
+
+    cg.saveGState()
+    squircle.addClip()
+
+    let bgGrad = NSGradient(colorsAndLocations:
+        (NSColor(calibratedRed: 0.14, green: 0.56, blue: 0.98, alpha: 1.0), 0.0),
+        (NSColor(calibratedRed: 0.07, green: 0.32, blue: 0.78, alpha: 1.0), 0.45),
+        (NSColor(calibratedRed: 0.04, green: 0.14, blue: 0.42, alpha: 1.0), 1.0)
+    )!
+    bgGrad.draw(in: bgRect, angle: -75)
+
+    let auraRect = NSRect(x: bgRect.minX - s * 0.10, y: bgRect.midY - s * 0.05, width: bgRect.width + s * 0.20, height: bgRect.height * 0.85)
+    let auraPath = NSBezierPath(ovalIn: auraRect)
+    let auraGrad = NSGradient(colors: [
+        NSColor(calibratedRed: 0.38, green: 0.86, blue: 1.0, alpha: 0.42),
+        NSColor(calibratedRed: 0.20, green: 0.50, blue: 0.98, alpha: 0.0)
     ])!
-    grad.draw(in: path, angle: -90)
+    auraGrad.draw(in: auraPath, relativeCenterPosition: .zero)
 
-    let lineW = max(1.0, s * 0.018)
+    func drawAppleDisplay(_ rect: NSRect, isPrimaryHero: Bool, dotColors: [NSColor]) {
+        let bezelR = rect.height * 0.13
+        let outerPath = NSBezierPath(roundedRect: rect, xRadius: bezelR, yRadius: bezelR)
 
-    func drawMiniScreen(_ rect: NSRect) {
-        let sp = NSBezierPath(roundedRect: rect, xRadius: s * 0.035, yRadius: s * 0.035)
-        sp.lineWidth = lineW
-        NSColor.white.withAlphaComponent(0.16).setFill()
-        sp.fill()
-        NSColor.white.withAlphaComponent(0.75).setStroke()
-        sp.stroke()
+        cg.saveGState()
+        let scrShadow = NSShadow()
+        scrShadow.shadowColor = NSColor(calibratedWhite: 0.0, alpha: isPrimaryHero ? 0.50 : 0.38)
+        scrShadow.shadowOffset = NSSize(width: 0, height: -s * 0.014)
+        scrShadow.shadowBlurRadius = s * 0.028
+        scrShadow.set()
+        NSColor(calibratedRed: 0.08, green: 0.11, blue: 0.18, alpha: 0.96).setFill()
+        outerPath.fill()
+        cg.restoreGState()
 
-        let dw = rect.width * 0.62
-        let dh = max(2.0, rect.height * 0.16)
-        let dRect = NSRect(x: rect.midX - dw / 2, y: rect.minY + rect.height * 0.10, width: dw, height: dh)
-        let dp = NSBezierPath(roundedRect: dRect, xRadius: dh / 2, yRadius: dh / 2)
-        NSColor(calibratedRed: 0.45, green: 0.86, blue: 1.0, alpha: 0.98).setFill()
-        dp.fill()
+        let bezelGrad = NSGradient(colors: [
+            NSColor(calibratedRed: 0.16, green: 0.20, blue: 0.29, alpha: 0.98),
+            NSColor(calibratedRed: 0.07, green: 0.09, blue: 0.15, alpha: 0.98)
+        ])!
+        bezelGrad.draw(in: outerPath, angle: -90)
+
+        let bezelThick = max(0.8, s * 0.011)
+        let innerRect = rect.insetBy(dx: bezelThick, dy: bezelThick)
+        let innerR = max(1.0, bezelR - bezelThick * 0.7)
+        let innerPath = NSBezierPath(roundedRect: innerRect, xRadius: innerR, yRadius: innerR)
+
+        let wpGrad = NSGradient(colorsAndLocations:
+            (NSColor(calibratedRed: 0.28, green: 0.78, blue: 0.99, alpha: 1.0), 0.0),
+            (NSColor(calibratedRed: 0.15, green: 0.45, blue: 0.92, alpha: 1.0), 0.52),
+            (NSColor(calibratedRed: 0.22, green: 0.18, blue: 0.62, alpha: 1.0), 1.0)
+        )!
+        wpGrad.draw(in: innerPath, angle: -65)
+
+        cg.saveGState()
+        innerPath.addClip()
+        let menuH = innerRect.height * 0.085
+        let menuRect = NSRect(x: innerRect.minX, y: innerRect.maxY - menuH, width: innerRect.width, height: menuH)
+        NSColor.white.withAlphaComponent(0.18).setFill()
+        menuRect.fill()
+
+        let glossPath = NSBezierPath()
+        glossPath.move(to: NSPoint(x: innerRect.minX, y: innerRect.maxY))
+        glossPath.line(to: NSPoint(x: innerRect.minX + innerRect.width * 0.58, y: innerRect.maxY))
+        glossPath.line(to: NSPoint(x: innerRect.minX + innerRect.width * 0.22, y: innerRect.minY))
+        glossPath.line(to: NSPoint(x: innerRect.minX, y: innerRect.minY))
+        glossPath.close()
+        NSColor.white.withAlphaComponent(0.08).setFill()
+        glossPath.fill()
+
+        let dockW = innerRect.width * 0.78
+        let dockH = max(2.0, innerRect.height * 0.24)
+        let dockY = innerRect.minY + innerRect.height * 0.075
+        let dockRect = NSRect(x: innerRect.midX - dockW / 2, y: dockY, width: dockW, height: dockH)
+        let dockR = dockH * 0.42
+        let dockPath = NSBezierPath(roundedRect: dockRect, xRadius: dockR, yRadius: dockR)
+
+        let dockGrad = NSGradient(colors: [
+            NSColor(calibratedWhite: 1.0, alpha: 0.48),
+            NSColor(calibratedRed: 0.78, green: 0.92, blue: 1.0, alpha: 0.28)
+        ])!
+        dockGrad.draw(in: dockPath, angle: -90)
+        NSColor.white.withAlphaComponent(0.72).setStroke()
+        dockPath.lineWidth = max(0.5, s * 0.003)
+        dockPath.stroke()
+
+        let count = dotColors.count
+        let padX = dockRect.width * 0.08
+        let usableW = dockRect.width - padX * 2
+        let slotW = usableW / CGFloat(count)
+        let iconSz = min(dockH * 0.66, slotW * 0.76)
+        let iconY = dockRect.midY - iconSz * 0.44
+
+        for (i, c) in dotColors.enumerated() {
+            let cx = dockRect.minX + padX + slotW * (CGFloat(i) + 0.5)
+            let iRect = NSRect(x: cx - iconSz / 2, y: iconY, width: iconSz, height: iconSz)
+            let iPath = NSBezierPath(roundedRect: iRect, xRadius: iconSz * 0.24, yRadius: iconSz * 0.24)
+            c.setFill()
+            iPath.fill()
+            if px >= 64 {
+                NSColor.white.withAlphaComponent(0.55).setStroke()
+                iPath.lineWidth = max(0.4, s * 0.0018)
+                iPath.stroke()
+            }
+            if px >= 128 && (i == 0 || i == 1 || i == count - 2) {
+                let dotD = max(1.0, s * 0.0045)
+                let dotRect = NSRect(x: cx - dotD / 2, y: dockRect.minY + dockH * 0.06, width: dotD, height: dotD)
+                NSColor.white.withAlphaComponent(0.95).setFill()
+                NSBezierPath(ovalIn: dotRect).fill()
+            }
+        }
+        cg.restoreGState()
+
+        outerPath.lineWidth = max(0.8, s * 0.0055)
+        NSColor(calibratedRed: 0.70, green: 0.88, blue: 1.0, alpha: isPrimaryHero ? 0.92 : 0.68).setStroke()
+        outerPath.stroke()
     }
 
-    // Upper row (2 displays)
-    let topW = s * 0.31
-    let topH = s * 0.22
-    let topY = s * 0.53
-    drawMiniScreen(NSRect(x: s * 0.17, y: topY, width: topW, height: topH))
-    drawMiniScreen(NSRect(x: s * 0.52, y: topY, width: topW, height: topH))
+    let tilePalette: [NSColor] = [
+        NSColor(calibratedRed: 0.16, green: 0.68, blue: 1.0, alpha: 1.0),
+        NSColor(calibratedRed: 0.15, green: 0.82, blue: 0.98, alpha: 1.0),
+        NSColor(calibratedRed: 1.0, green: 0.76, blue: 0.18, alpha: 1.0),
+        NSColor(calibratedRed: 0.98, green: 0.26, blue: 0.42, alpha: 1.0),
+        NSColor(calibratedRed: 0.22, green: 0.84, blue: 0.48, alpha: 1.0)
+    ]
 
-    // Lower row (3 displays)
-    let botW = s * 0.22
-    let botH = s * 0.19
-    let botY = s * 0.25
-    drawMiniScreen(NSRect(x: s * 0.14, y: botY, width: botW, height: botH))
-    drawMiniScreen(NSRect(x: s * 0.39, y: botY, width: botW, height: botH))
-    drawMiniScreen(NSRect(x: s * 0.64, y: botY, width: botW, height: botH))
+    let topW = s * 0.345
+    let topH = s * 0.235
+    let topY = s * 0.535
+    drawAppleDisplay(NSRect(x: s * 0.145, y: topY, width: topW, height: topH), isPrimaryHero: true, dotColors: tilePalette)
+    drawAppleDisplay(NSRect(x: s * 0.510, y: topY, width: topW, height: topH), isPrimaryHero: true, dotColors: tilePalette)
+
+    let sideW = s * 0.225
+    let sideH = s * 0.190
+    let sideY = s * 0.240
+    drawAppleDisplay(NSRect(x: s * 0.125, y: sideY, width: sideW, height: sideH), isPrimaryHero: false, dotColors: Array(tilePalette.prefix(4)))
+    drawAppleDisplay(NSRect(x: s * 0.650, y: sideY, width: sideW, height: sideH), isPrimaryHero: false, dotColors: Array(tilePalette.prefix(4)))
+
+    let centerW = s * 0.265
+    let centerH = s * 0.210
+    let centerY = s * 0.235
+    let baseRect = NSRect(x: s * 0.50 - centerW * 0.56, y: centerY - s * 0.016, width: centerW * 1.12, height: s * 0.018)
+    let basePath = NSBezierPath(roundedRect: baseRect, xRadius: s * 0.008, yRadius: s * 0.008)
+    NSColor(calibratedRed: 0.65, green: 0.78, blue: 0.95, alpha: 0.65).setFill()
+    basePath.fill()
+    drawAppleDisplay(NSRect(x: s * 0.50 - centerW / 2, y: centerY, width: centerW, height: centerH), isPrimaryHero: true, dotColors: tilePalette)
+
+    cg.restoreGState()
+
+    squircle.lineWidth = max(0.8, s * 0.007)
+    NSColor.white.withAlphaComponent(0.38).setStroke()
+    squircle.stroke()
 
     NSGraphicsContext.restoreGraphicsState()
 
@@ -145,7 +268,7 @@ cat > "${CONTENTS_DIR}/Info.plist" << 'EOF'
     <key>CFBundleShortVersionString</key>
     <string>1.5.0</string>
     <key>CFBundleVersion</key>
-    <string>14</string>
+    <string>15</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.utilities</string>
     <key>LSMinimumSystemVersion</key>
@@ -189,6 +312,10 @@ lipo -create -output "${MACOS_DIR}/${APP_NAME}" "${BUILD_TMP}/${APP_NAME}-arm64"
 xattr -cr "${APP_BUNDLE}"
 CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
 if [[ "${MAS_BUILD}" == "true" ]]; then
+    PROVISION_PROFILE="${PROJECT_DIR}/packaging/mas/embedded.provisionprofile"
+    if [[ -f "${PROVISION_PROFILE}" ]]; then
+        cp "${PROVISION_PROFILE}" "${CONTENTS_DIR}/embedded.provisionprofile"
+    fi
     ENTITLEMENTS_PATH="${PROJECT_DIR}/packaging/mas/MultiScreenDock-MAS.entitlements"
     codesign --force --deep --entitlements "${ENTITLEMENTS_PATH}" --sign "${CODESIGN_IDENTITY}" "${APP_BUNDLE}"
 else

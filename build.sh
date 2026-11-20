@@ -268,7 +268,7 @@ cat > "${CONTENTS_DIR}/Info.plist" << 'EOF'
     <key>CFBundleShortVersionString</key>
     <string>1.5.0</string>
     <key>CFBundleVersion</key>
-    <string>15</string>
+    <string>16</string>
     <key>LSApplicationCategoryType</key>
     <string>public.app-category.utilities</string>
     <key>LSMinimumSystemVersion</key>
@@ -309,27 +309,30 @@ swiftc -O "${SWIFT_FLAGS[@]}" -target arm64-apple-macos13.0 "${FRAMEWORKS[@]}" "
 swiftc -O "${SWIFT_FLAGS[@]}" -target x86_64-apple-macos13.0 -Xlinker -w "${FRAMEWORKS[@]}" "${SOURCES[@]}" -o "${BUILD_TMP}/${APP_NAME}-x86_64"
 lipo -create -output "${MACOS_DIR}/${APP_NAME}" "${BUILD_TMP}/${APP_NAME}-arm64" "${BUILD_TMP}/${APP_NAME}-x86_64"
 
-xattr -cr "${APP_BUNDLE}"
 CODESIGN_IDENTITY="${CODESIGN_IDENTITY:--}"
 if [[ "${MAS_BUILD}" == "true" ]]; then
     PROVISION_PROFILE="${PROJECT_DIR}/packaging/mas/embedded.provisionprofile"
     if [[ -f "${PROVISION_PROFILE}" ]]; then
         cp "${PROVISION_PROFILE}" "${CONTENTS_DIR}/embedded.provisionprofile"
     fi
+    xattr -cr "${APP_BUNDLE}"
     ENTITLEMENTS_PATH="${PROJECT_DIR}/packaging/mas/MultiScreenDock-MAS.entitlements"
     codesign --force --deep --entitlements "${ENTITLEMENTS_PATH}" --sign "${CODESIGN_IDENTITY}" "${APP_BUNDLE}"
+    codesign --verify --deep --strict "${APP_BUNDLE}"
 else
+    xattr -cr "${APP_BUNDLE}"
     codesign --force --deep --sign "${CODESIGN_IDENTITY}" "${APP_BUNDLE}"
 fi
-
-rm -rf "${FINAL_APP_BUNDLE}"
-ditto "${APP_BUNDLE}" "${FINAL_APP_BUNDLE}"
 
 if [[ "${MAS_BUILD}" == "true" && -n "${MAS_INSTALLER_IDENTITY:-}" ]]; then
     PKG_PATH="${PROJECT_DIR}/${APP_NAME}-MAS.pkg"
     rm -f "${PKG_PATH}"
-    productbuild --component "${FINAL_APP_BUNDLE}" /Applications --sign "${MAS_INSTALLER_IDENTITY}" "${PKG_PATH}"
+    productbuild --component "${APP_BUNDLE}" /Applications --sign "${MAS_INSTALLER_IDENTITY}" "${PKG_PATH}"
     echo "Mac App Store package ready: ${PKG_PATH}"
 fi
+
+rm -rf "${FINAL_APP_BUNDLE}"
+ditto --norsrc "${APP_BUNDLE}" "${FINAL_APP_BUNDLE}"
+xattr -cr "${FINAL_APP_BUNDLE}"
 
 echo "Build complete: ${FINAL_APP_BUNDLE}"
